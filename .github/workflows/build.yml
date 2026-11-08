@@ -44,12 +44,12 @@ jobs:
       - name: Preparar assets do Monaco
         run: node scripts/prepare-monaco.js
 
-      - name: Build release (single .exe)
-        run: cargo build --release --target x86_64-pc-windows-msvc --locked
+      - name: Build Windows x64
+        run: cargo build --target x86_64-pc-windows-msvc --locked
 
       - name: Upload do executável
         uses: actions/upload-artifact@v4
         with:
           name: wincode-windows-x64
-          path: wincode/target/x86_64-pc-windows-msvc/release/wincode.exe
+          path: wincode/target/x86_64-pc-windows-msvc/wincode.exe
           if-no-files-found: error
