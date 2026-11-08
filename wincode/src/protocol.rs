@@ -55,9 +55,11 @@ fn api(
             json(serde_json::json!({
                 "root": guard.root.to_string_lossy(),
                 "cwd": guard.cwd.to_string_lossy(),
+                "selectionRequired": !guard.selected,
             }))
         }
         "pickfolder" => pick_folder(state),
+        "pickfile" => pick_file(state),
         "ls" => list(param(query, "path"), state),
         "read" => read(param(query, "path"), state),
         "write" => write(param(query, "path"), body, state),
@@ -80,11 +82,31 @@ fn pick_folder(state: &Arc<Mutex<FsState>>) -> Response<Body> {
     match crate::dialog::pick_folder() {
         Ok(Some(dir)) => {
             let mut guard = state.lock().unwrap();
-            guard.root = dir.clone();
-            guard.cwd = dir.clone();
+            guard.set_root(dir.clone());
             json(serde_json::json!({
                 "root": dir.to_string_lossy(),
                 "cwd": dir.to_string_lossy(),
+                "selectionRequired": false,
+            }))
+        }
+        Ok(None) => json(serde_json::json!({ "canceled": true })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+fn pick_file(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    match crate::dialog::pick_file() {
+        Ok(Some(file)) => {
+            let Some(dir) = file.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
+                return plain(StatusCode::BAD_REQUEST, "o arquivo não está em uma pasta");
+            };
+            let mut guard = state.lock().unwrap();
+            guard.set_root(dir.to_path_buf());
+            json(serde_json::json!({
+                "root": dir.to_string_lossy(),
+                "cwd": dir.to_string_lossy(),
+                "file": file.to_string_lossy(),
+                "selectionRequired": false,
             }))
         }
         Ok(None) => json(serde_json::json!({ "canceled": true })),

@@ -16,23 +16,31 @@ use wry::application::event_loop::{ControlFlow, EventLoop};
 use wry::application::window::WindowBuilder;
 use wry::webview::WebViewBuilder;
 
-/// Pasta aberta: `WINCODE_ROOT`, primeiro argumento ou diretório atual.
-fn root_from_args() -> PathBuf {
+/// Pasta inicial: `WINCODE_ROOT`, primeiro argumento ou tela de seleção.
+fn root_from_args() -> Option<PathBuf> {
     if let Ok(dir) = std::env::var("WINCODE_ROOT") {
         let path = PathBuf::from(dir);
         if path.is_dir() {
-            return path;
+            return Some(path);
         }
     }
 
     if let Some(arg) = std::env::args().nth(1) {
-        let path = PathBuf::from(arg);
+        let path = PathBuf::from(&arg);
         if path.is_dir() {
-            return path;
+            return Some(path);
+        }
+        if path.is_file() {
+            if let Some(parent) = path.parent() {
+                if !parent.as_os_str().is_empty() {
+                    return Some(parent.to_path_buf());
+                }
+            }
+            return std::env::current_dir().ok();
         }
     }
 
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    None
 }
 
 fn main() {
@@ -65,6 +73,7 @@ fn run() -> Result<(), String> {
     let window = WindowBuilder::new()
         .with_title("Wincode")
         .with_inner_size(wry::application::dpi::LogicalSize::new(1280.0, 800.0))
+        .with_window_icon(assets::icon())
         .build(&event_loop)
         .map_err(|err| format!("não foi possível criar a janela: {err}"))?;
 

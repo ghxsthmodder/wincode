@@ -9,6 +9,7 @@ description = "Wincode — editor de código minimalista (file tree | Monaco | t
 wry = { version = "0.31", default-features = false, features = ["protocol"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 urlencoding = "2"
+tao = "0.22"
 
 # Diálogo nativo de seleção de pasta (IFileOpenDialog no Windows).
 [target.'cfg(windows)'.dependencies]

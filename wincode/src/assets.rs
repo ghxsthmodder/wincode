@@ -1,5 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
+use tao::platform::windows::IconExtWindows;
+use tao::window::Icon;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -47,4 +49,17 @@ fn disk_root_override() -> Option<PathBuf> {
     let dir = std::env::var("WINCODE_ASSET_DIR").ok()?;
     let path = PathBuf::from(dir);
     path.is_dir().then_some(path)
+}
+
+/// Ícone da janela. Sempre carregado do disco (nunca embutido): o arquivo
+/// `.ico` com 256×256px tem o tamanho que o Windows exige e não precisa passar
+/// pela tabela de assets embutidos.
+pub(super) fn icon() -> Option<Icon> {
+    let path = if let Ok(dir) = std::env::var("WINCODE_ASSET_DIR") {
+        PathBuf::from(dir).join("icons/wincode.ico")
+    } else {
+        PathBuf::from("assets/icons/wincode.ico")
+    };
+
+    Icon::from_path(path, None).ok()
 }

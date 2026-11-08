@@ -4,16 +4,36 @@ use std::path::{Path, PathBuf};
 pub(super) struct FsState {
     /// Raiz do projeto aberto. Nenhum caminho fora dela é acessível.
     pub(super) root: PathBuf,
+    /// Indica se a pasta foi escolhida pela CLI ou pela tela de seleção.
+    /// Sem ela, o front-end mostra a tela de boas-vindas.
+    pub(super) selected: bool,
     /// Diretório de trabalho do terminal integrado.
     pub(super) cwd: PathBuf,
 }
 
 impl FsState {
-    pub(super) fn new(root: PathBuf) -> Self {
-        Self {
-            cwd: root.clone(),
-            root,
+    pub(super) fn new(root: Option<PathBuf>) -> Self {
+        match root {
+            Some(dir) => Self {
+                cwd: dir.clone(),
+                root: dir,
+                selected: true,
+            },
+            None => {
+                let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                Self {
+                    cwd: current.clone(),
+                    root: current,
+                    selected: false,
+                }
+            }
         }
+    }
+
+    pub(super) fn set_root(&mut self, root: PathBuf) {
+        self.cwd = root.clone();
+        self.root = root;
+        self.selected = true;
     }
 
     /// Resolve um caminho vindo da interface, impedindo sair da raiz do projeto.

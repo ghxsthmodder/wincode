@@ -94,11 +94,13 @@
   .row .name { overflow: hidden; text-overflow: ellipsis; }
   .row.dir .name { color: var(--accent); }
 
-  .main { display: grid; grid-template-rows: 30px 1fr 210px; min-height: 0; background: var(--surface); }
+  .main { display: grid; grid-template-rows: var(--editor-head-height) 1fr var(--terminal-height); min-height: 0; background: var(--surface); }
   .editor-head {
     display: flex; align-items: center; gap: 8px; padding: 0 12px;
     background: var(--panel); border-bottom: 1px solid var(--border);
     font-size: 12px; color: var(--muted);
+    height: var(--editor-head-height);
+    overflow: hidden;
   }
   .tabs {
     flex: 1; display: flex; align-items: stretch; gap: 2px; height: 100%;
@@ -165,6 +167,24 @@
   .statusbar .spacer { flex: 1; }
   .dim { color: var(--muted); }
 
+  :root { --editor-head-height: 30px; --terminal-height: 210px; }
+
+  .panels .resize-handle {
+    position: relative; z-index: 5; height: 100%; width: 6px; cursor: ew-resize; background: var(--border);
+  }
+  .panels .resize-handle::before {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+    background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
+  }
+  .main .resize-handle.vert {
+    position: relative; z-index: 5; width: 100%; height: 6px; cursor: ns-resize; background: var(--border);
+  }
+  .main .resize-handle.vert::before {
+    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
+    background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
+  }
+  .panels.hidden-sidebar .resize-handle { display: none; }
+  .main.hidden-terminal .resize-handle.vert { display: none; }
   .ctxmenu {
     position: fixed; z-index: 50; min-width: 170px; padding: 4px;
     background: var(--surface); border: 1px solid var(--border);
@@ -233,6 +253,17 @@
   .palette-item.active { background: rgba(137,180,250,.18); }
   body.light .palette-item.active { background: rgba(37,99,235,.14); }
   .palette-empty { padding: 12px; text-align: center; }
+
+  .welcome { z-index: 80; }
+  .welcome-box { padding: 24px; text-align: center; }
+  .welcome-box h2 { margin: 0 0 8px; font-size: 20px; }
+  .welcome-box p { margin: 0; color: var(--muted); }
+  .welcome-actions { display: flex; justify-content: center; gap: 10px; margin-top: 18px; }
+  .welcome-actions button {
+    padding: 8px 14px; background: transparent; border: 1px solid var(--border);
+    border-radius: 5px; color: var(--text); font: inherit; cursor: pointer;
+  }
+  .welcome-actions button:hover { background: rgba(255,255,255,.06); }
   .settings h3 {
     margin: 14px 0 2px; font-size: 10px; text-transform: uppercase;
     letter-spacing: .1em; color: var(--muted);
@@ -260,11 +291,13 @@
       <span class="brand">Wincode</span>
       <span id="rootlabel" class="rootlabel">carregando…</span>
       <button id="btnopenfolder" title="Abrir outra pasta">abrir pasta</button>
+      <button id="btnopenfile" title="Abrir arquivo">abrir arquivo</button>
       <button id="btnrefresh" title="Recarregar a árvore de arquivos">recarregar</button>
       <button id="btnsettings" title="Configurações (Ctrl+,)">⚙ configurações</button>
     </header>
 
     <div class="panels">
+      <div class="resize-handle" id="sidebar-resize" title="Arraste para redimensionar o explorador"></div>
       <aside class="sidebar">
         <div class="panel-title">
           <span>Explorador</span>
@@ -276,7 +309,8 @@
       </aside>
 
       <main class="main">
-        <div class="editor-head">
+      <div class="resize-handle vert" id="terminal-resize" title="Arraste para redimensionar o terminal"></div>
+      <div class="editor-head">
           <div id="tabs" class="tabs" hidden></div>
         </div>
         <div id="editor" class="editor"></div>
@@ -303,6 +337,17 @@
       <span id="statusfile"></span>
       <span id="statuspos">Ln 1, Col 1</span>
     </footer>
+  </div>
+
+  <div id="welcome" class="overlay welcome" hidden>
+    <div class="dialog welcome-box">
+      <h2>Wincode</h2>
+      <p>Escolha uma pasta de projeto ou um arquivo para começar.</p>
+      <div class="welcome-actions">
+        <button id="welcomefolder" type="button" class="primary">abrir pasta…</button>
+        <button id="welcome file" type="button">abrir arquivo…</button>
+      </div>
+    </div>
   </div>
 
   <div id="settings" class="overlay" hidden>
@@ -437,6 +482,22 @@
           <span class="label">ícones na árvore</span>
           <input id="set-treeicons" type="checkbox">
         </label>
+        <label class="setting">
+          <span class="label">explorador de arquivos</span>
+          <input id="set-showsidebar" type="checkbox">
+        </label>
+        <label class="setting">
+          <span class="label">abas de arquivo</span>
+          <input id="set-showtabs" type="checkbox">
+        </label>
+        <label class="setting">
+          <span class="label">terminal</span>
+          <input id="set-showterminal" type="checkbox">
+        </label>
+        <label class="setting">
+          <span class="label">altura do terminal<small>em pixels</small></span>
+          <input id="set-terminalheight" type="number" min="100" max="400" step="10">
+        </label>
 
         <h3>Terminal</h3>
 
@@ -474,6 +535,8 @@ const els = {
   palettelist: $('palettelist'),
   termout: $('termout'),
   cmdinput: $('cmdinput'),
+  welcome: $('welcome'),
+  sidebar: $('sidebar'),
   prompt: $('prompt'),
   shellcwd: $('shellcwd'),
   rootlabel: $('rootlabel'),
@@ -482,7 +545,10 @@ const els = {
   statuspos: $('statuspos'),
 };
 
-const state = { root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false, history: [], historyIndex: 0 };
+const state = {
+  root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false,
+  history: [], historyIndex: 0, selectionRequired: false,
+};
 const models = new Map();
 let view = null;
 let activePath = null;
@@ -534,19 +600,32 @@ function loadMonaco() {
 }
 
 const LANGUAGE_BY_EXT = {
-  rs: 'rust',
-  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript',
-  html: 'html', htm: 'html',
+  rs: 'rust', rlib: 'rust',
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript', es6: 'javascript',
+  ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+  html: 'html', htm: 'html', shtml: 'html', xhtml: 'html', jsp: 'html', asp: 'html', aspx: 'html', vue: 'html', svelte: 'html',
   css: 'css', scss: 'scss', less: 'less',
-  json: 'json',
-  md: 'markdown', markdown: 'markdown',
-  toml: 'ini', ini: 'ini',
+  json: 'json', jsonc: 'json',
+  md: 'markdown', markdown: 'markdown', mdown: 'markdown', mkdn: 'markdown', mkd: 'markdown', mdwn: 'markdown', mdtxt: 'markdown', mdtext: 'markdown', mdx: 'mdx',
+  toml: 'ini', ini: 'ini', properties: 'ini', gitconfig: 'ini', gitignore: 'ini',
   yaml: 'yaml', yml: 'yaml',
-  py: 'python', rb: 'ruby', go: 'go',
-  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
-  java: 'java', cs: 'csharp', php: 'php', sh: 'shell', bash: 'shell',
-  sql: 'sql', xml: 'xml', svg: 'xml', txt: 'plaintext',
+  py: 'python', rpy: 'python', pyw: 'python', cpy: 'python', gyp: 'python', gypi: 'python',
+  rb: 'ruby', rbx: 'ruby', rjs: 'ruby', gemspec: 'ruby', go: 'go', lua: 'lua',
+  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp', hxx: 'cpp', m: 'objective-c',
+  java: 'java', jav: 'java', cs: 'csharp', csx: 'csharp', cake: 'csharp', php: 'php', php3: 'php', php4: 'php', php5: 'php', phtml: 'php', ctp: 'php',
+  sh: 'shell', bash: 'shell', zsh: 'shell', fish: 'shell', ps1: 'powershell', psm1: 'powershell', psd1: 'powershell', bat: 'bat', cmd: 'bat',
+  sql: 'sql', mysql: 'mysql', pgsql: 'pgsql', redshift: 'redshift',
+  xml: 'xml', xsd: 'xml', dtd: 'xml', ascx: 'xml', csproj: 'xml', config: 'xml', props: 'xml', targets: 'xml', wxi: 'xml', wxl: 'xml', wxs: 'xml', xaml: 'xml', svg: 'xml', svgz: 'xml', opf: 'xml', xslt: 'xml', xsl: 'xml',
+  kt: 'kotlin', kts: 'kotlin', swift: 'swift', dart: 'dart', scala: 'scala', sc: 'scala', sbt: 'scala',
+  ex: 'elixir', exs: 'elixir', jl: 'julia', clj: 'clojure', cljs: 'clojure', cljc: 'clojure', edn: 'clojure',
+  coffee: 'coffeescript', graphql: 'graphql', gql: 'graphql', proto: 'proto', tf: 'hcl', tfvars: 'hcl', hcl: 'hcl',
+  dockerfile: 'dockerfile', makefile: 'shell', cmake: 'shell', txt: 'plaintext',
+  rst: 'restructuredtext', vue: 'html', svelte: 'html', handlebars: 'handlebars', hbs: 'handlebars', twig: 'twig', pug: 'pug', jade: 'pug',
+  cypher: 'cypher', cyp: 'cypher', sol: 'sol', sparql: 'sparql', rq: 'sparql', redis: 'redis', msdax: 'msdax', dax: 'msdax',
+  pas: 'pascal', p: 'pascal', pp: 'pascal', pl: 'perl', pm: 'perl', qsharp: 'qsharp', qs: 'qsharp', r: 'r', rhistory: 'r', rmd: 'r', rprofile: 'r', rt: 'r',
+  fsharp: 'fsharp', fs: 'fsharp', fsi: 'fsharp', fsx: 'fsharp', fsscript: 'fsharp', vb: 'vb', mips: 'mips', s: 'mips', st: 'st', iecst: 'st', tcl: 'tcl',
+  bicep: 'bicep', abap: 'abap', apex: 'apex', cls: 'apex', azcli: 'azcli', ecl: 'ecl', cameligo: 'cameligo', mligo: 'cameligo',
+  freemarker2: 'freemarker2', ftl: 'freemarker2', flow9: 'flow9', flow: 'flow9', liquid: 'liquid', m3: 'm3', i3: 'm3', mq: 'powerquery', pq: 'powerquery', pqm: 'powerquery',
 };
 
 const languageFor = (path) => LANGUAGE_BY_EXT[(path.split('.').pop() || '').toLowerCase()] || 'plaintext';
@@ -581,6 +660,9 @@ const SETTINGS_DEFAULTS = {
   uiFontSize: 13,
   sidebarWidth: 250,
   treeIcons: true,
+  showSidebar: true,
+  showTabs: true,
+  showTerminal: true,
   terminalFontSize: 12.5,
 };
 
@@ -591,6 +673,7 @@ const SETTING_RANGES = {
   uiFontSize: [10, 18],
   sidebarWidth: [180, 520],
   terminalFontSize: [9, 20],
+  terminalHeight: [100, 400],
 };
 
 const SETTING_ENUMS = {
@@ -623,10 +706,13 @@ const SETTINGS_FIELDS = {
   uiFontSize: 'set-uifont',
   sidebarWidth: 'set-sidebar',
   treeIcons: 'set-treeicons',
+  showSidebar: 'set-showsidebar',
+  showTabs: 'set-showtabs',
+  showTerminal: 'set-showterminal',
   terminalFontSize: 'set-termfont',
 };
 
-const BOOL_SETTINGS = new Set(['detectIndentation', 'minimap', 'smoothScrolling', 'autoSave', 'treeIcons']);
+const BOOL_SETTINGS = new Set(['detectIndentation', 'minimap', 'smoothScrolling', 'autoSave', 'treeIcons', 'showSidebar', 'showTabs', 'showTerminal']);
 
 let settings = { ...SETTINGS_DEFAULTS };
 let settingsSaveTimer = null;
@@ -705,7 +791,13 @@ function applySettings({ persist = true } = {}) {
   root.setProperty('--ui-font-size', `${settings.uiFontSize}px`);
   root.setProperty('--sidebar-width', `${settings.sidebarWidth}px`);
   root.setProperty('--term-font-size', `${settings.terminalFontSize}px`);
+  root.setProperty('--terminal-height', `${settings.terminalHeight}px`);
   els.tree.classList.toggle('no-icons', !settings.treeIcons);
+  els.sidebar.classList.toggle('hidden-sidebar', !settings.showSidebar);
+  els.tabs.classList.toggle('hidden', !settings.showTabs);
+  els.terminal.classList.toggle('hidden-terminal', !settings.showTerminal);
+  if (settings.showTabs) els.tabs.hidden = false;
+  if (settings.showTerminal) els.terminal.hidden = false;
 
   if (window.monaco && view) {
     window.monaco.editor.setTheme(settings.theme);
@@ -777,6 +869,9 @@ function bindSettings() {
 
   $('setreset').addEventListener('click', resetSettings);
 
+  $('sidebar-resize').addEventListener('mousedown', startResizeSidebar);
+  $('terminal-resize').addEventListener('mousedown', startResizeTerminal);
+
   const onChange = () => {
     settings = readSettingsForm();
     applySettings();
@@ -821,10 +916,79 @@ function resetSettings() {
   setStatus('configurações restauradas ao padrão');
 }
 
+let resizeTimer = null;
+let resizeActive = false;
+let resizeStartX = 0;
+let resizeStartWidth = 0;
+
+function startResizeSidebar(event) {
+  event.preventDefault();
+  resizeActive = true;
+  resizeStartX = event.clientX;
+  resizeStartWidth = parseInt(getComputedStyle(els.sidebar).width, 10);
+  document.addEventListener('mousemove', resizeSidebar);
+  document.addEventListener('mouseup', stopResizeSidebar);
+}
+
+function resizeSidebar(event) {
+  if (!resizeActive) return;
+  const dx = event.clientX - resizeStartX;
+  const next = resizeStartWidth + dx;
+  const min = parseInt(getComputedStyle(els.sidebar).minWidth, 10) || 180;
+  const max = parseInt(getComputedStyle(els.sidebar).maxWidth, 10) || 520;
+  const value = Math.min(max, Math.max(min, next));
+  els.sidebar.style.width = `${value}px`;
+  setSetting('sidebarWidth', value);
+}
+
+function stopResizeSidebar() {
+  if (!resizeActive) return;
+  resizeActive = false;
+  document.removeEventListener('mousemove', resizeSidebar);
+  document.removeEventListener('mouseup', stopResizeSidebar);
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    setSetting('sidebarWidth', parseInt(els.sidebar.style.width, 10) || settings.sidebarWidth);
+  }, 300);
+}
+
+let resizeTerminalY = 0;
+let resizeTerminalStart = 0;
+
+function startResizeTerminal(event) {
+  event.preventDefault();
+  resizeTerminalY = event.clientY;
+  resizeTerminalStart = parseInt(getComputedStyle(els.terminal).height, 10);
+  document.addEventListener('mousemove', resizeTerminal);
+  document.addEventListener('mouseup', stopResizeTerminal);
+}
+
+function resizeTerminal(event) {
+  const dy = event.clientY - resizeTerminalY;
+  const next = resizeTerminalStart + dy;
+  const min = parseInt(getComputedStyle(els.terminal).minHeight, 10) || 100;
+  const max = parseInt(getComputedStyle(els.terminal).maxHeight, 10) || 400;
+  const value = Math.min(max, Math.max(min, next));
+  els.terminal.style.height = `${value}px`;
+  setSetting('terminalHeight', value);
+}
+
+function stopResizeTerminal() {
+  if (!resizeTerminalY) return;
+  resizeTerminalY = 0;
+  document.removeEventListener('mousemove', resizeTerminal);
+  document.removeEventListener('mouseup', stopResizeTerminal);
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    setSetting('terminalHeight', parseInt(els.terminal.style.height, 10) || settings.terminalHeight);
+  }, 300);
+}
+
 function paletteCommands() {
   const commands = [
     { title: 'abrir configurações', hint: 'Ctrl+,', run: openSettings },
     { title: 'salvar arquivo', hint: 'Ctrl+S', run: saveActiveFile },
+    { title: 'abrir arquivo…', run: chooseFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
     { title: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
@@ -1854,6 +2018,7 @@ async function refreshTree() {
 function resetWorkspace(info) {
   state.root = info.root;
   state.cwd = info.cwd || info.root;
+  state.selectionRequired = false;
   els.rootlabel.textContent = state.root;
   els.rootlabel.title = state.root;
   updatePrompt();
@@ -1876,20 +2041,52 @@ function resetWorkspace(info) {
   els.tree.innerHTML = '<div class="dim pad">carregando…</div>';
 }
 
+function showWelcome() {
+  els.welcome.hidden = false;
+  $('welcomefolder').focus();
+}
+
+function hideWelcome() {
+  els.welcome.hidden = true;
+}
+
 async function chooseFolder() {
   setStatus('escolhendo pasta…');
   try {
     const result = await apiJson('/api/pickfolder');
     if (result.canceled || !result.root) {
       setStatus('pronto');
+      if (state.selectionRequired) showWelcome();
       return;
     }
     resetWorkspace(result);
+    hideWelcome();
     await refreshTree();
     setStatus('pasta aberta: ' + shortPath(result.root));
     els.cmdinput.focus();
   } catch (err) {
     setStatus('erro ao abrir pasta: ' + err.message);
+    if (state.selectionRequired) showWelcome();
+  }
+}
+
+async function chooseFile() {
+  setStatus('escolhendo arquivo…');
+  try {
+    const result = await apiJson('/api/pickfile');
+    if (result.canceled || !result.root || !result.file) {
+      setStatus('pronto');
+      if (state.selectionRequired) showWelcome();
+      return;
+    }
+    resetWorkspace(result);
+    hideWelcome();
+    await refreshTree();
+    await openFile(result.file);
+    setStatus('arquivo aberto: ' + shortPath(result.file));
+  } catch (err) {
+    setStatus('erro ao abrir arquivo: ' + err.message);
+    if (state.selectionRequired) showWelcome();
   }
 }
 
@@ -2011,6 +2208,9 @@ function bindTerminal() {
   $('btnclear').addEventListener('click', () => { els.termout.textContent = ''; });
   $('btnrefresh').addEventListener('click', () => { refreshTree(); });
   $('btnopenfolder').addEventListener('click', chooseFolder);
+  $('btnopenfile').addEventListener('click', chooseFile);
+  $('welcomefolder').addEventListener('click', chooseFolder);
+  $('welcome file').addEventListener('click', chooseFile);
 
   $('btnnewfile').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'file'));
   $('btnnewfolder').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'dir'));
@@ -2067,12 +2267,19 @@ function bindTerminal() {
     state.root = info.root;
     state.cwd = info.cwd;
     state.selectedDir = state.root;
-    els.rootlabel.textContent = state.root;
-    els.rootlabel.title = state.root;
+    state.selectionRequired = info.selectionRequired === true;
+    els.rootlabel.textContent = state.selectionRequired ? 'nenhuma pasta aberta' : state.root;
+    els.rootlabel.title = state.selectionRequired ? '' : state.root;
     updatePrompt();
-    await refreshTree();
-    updateDirty();
-    els.cmdinput.focus();
+    if (state.selectionRequired) {
+      showWelcome();
+      setStatus('selecione uma pasta ou arquivo para começar');
+    } else {
+      hideWelcome();
+      await refreshTree();
+      updateDirty();
+      els.cmdinput.focus();
+    }
   } catch (err) {
     setStatus('falha na inicialização');
     els.editorEl.textContent = '';
