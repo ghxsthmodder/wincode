@@ -79,6 +79,19 @@ set WINCODE_ROOT=C:\projetos\meu-app
 O botão **abrir pasta** na barra superior abre o diálogo nativo do Windows
 (`IFileOpenDialog` via crate `rfd`) e troca a raiz do projeto sem reiniciar o editor.
 
+## Abas
+
+Cada arquivo aberto vira uma aba acima do editor:
+
+- clique troca para o arquivo (sem reler o disco, mantendo edições não salvas)
+- **×** (ou clique do meio) fecha a aba; se houver alterações não salvas, um diálogo pede confirmação
+- **●** marca a aba com alterações pendentes e acompanha o digitar
+- renomear atualiza o nome/caminho da aba; excluir fecha as abas afetadas;
+  fechar a aba ativa passa para a última aberta, e a última fechada deixa o editor vazio
+
+A ordem das abas segue a ordem de abertura, e a paleta (`Ctrl+Shift+P`) também
+oferece **fechar arquivo atual**.
+
 ## Gerenciamento de arquivos e pastas
 
 No **Explorador**, use os botões `+ arquivo` / `+ pasta` no topo do painel ou o

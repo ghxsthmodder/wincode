@@ -100,10 +100,32 @@
     background: var(--panel); border-bottom: 1px solid var(--border);
     font-size: 12px; color: var(--muted);
   }
-  .tab { color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
-  .tab[hidden] { display: none; }
-  .tab.dirty { color: var(--accent2); }
-  .tab .tabicon { width: 14px; height: 14px; flex: 0 0 auto; }
+  .tabs {
+    flex: 1; display: flex; align-items: stretch; gap: 2px; height: 100%;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { height: 0; }
+  .tabs[hidden] { display: none; }
+  .tabfile {
+    display: flex; align-items: center; gap: 6px; padding: 0 6px 0 10px;
+    max-width: 200px; border-right: 1px solid var(--border);
+    border-top: 2px solid transparent; color: var(--muted);
+    cursor: pointer; white-space: nowrap; user-select: none;
+  }
+  .tabfile:hover { background: rgba(255,255,255,.04); }
+  body.light .tabfile:hover { background: rgba(15,23,42,.05); }
+  .tabfile.active { background: var(--surface); border-top-color: var(--accent); color: var(--text); }
+  .tabfile.dirty { color: var(--accent2); }
+  .tabfile .tabicon { width: 14px; height: 14px; flex: 0 0 auto; }
+  .tabfile .tabname { overflow: hidden; text-overflow: ellipsis; }
+  .tabfile .tabdot { color: var(--accent2); font-size: 9px; }
+  .tabfile .tabclose {
+    border: none; background: transparent; color: inherit; cursor: pointer;
+    font: inherit; font-size: 14px; line-height: 1; padding: 0 3px;
+    border-radius: 3px; opacity: 0;
+  }
+  .tabfile:hover .tabclose, .tabfile.active .tabclose { opacity: .65; }
+  .tabfile .tabclose:hover { opacity: 1; background: rgba(127,127,127,.22); }
   .editor { min-height: 0; position: relative; }
 
   .terminal {
@@ -255,10 +277,7 @@
 
       <main class="main">
         <div class="editor-head">
-          <span id="tab" class="tab" hidden>
-            <img id="tabicon" class="tabicon" alt="">
-            <span id="tabname"></span>
-          </span>
+          <div id="tabs" class="tabs" hidden></div>
         </div>
         <div id="editor" class="editor"></div>
 
@@ -448,13 +467,11 @@ const $ = (id) => document.getElementById(id);
 const els = {
   tree: $('tree'),
   editorEl: $('editor'),
-  tab: $('tab'),
+  tabs: $('tabs'),
   settings: $('settings'),
   palette: $('palette'),
   paletteinput: $('paletteinput'),
   palettelist: $('palettelist'),
-  tabicon: $('tabicon'),
-  tabname: $('tabname'),
   termout: $('termout'),
   cmdinput: $('cmdinput'),
   prompt: $('prompt'),
@@ -673,6 +690,15 @@ function fillSettingsForm() {
   }
 }
 
+/** Opções de indentação são por modelo: todo modelo novo passa por aqui. */
+function applyModelOptions(model) {
+  model.updateOptions({
+    tabSize: settings.tabSize,
+    insertSpaces: settings.tabMode === 'space',
+    detectIndentation: settings.detectIndentation,
+  });
+}
+
 function applySettings({ persist = true } = {}) {
   const root = document.documentElement.style;
   document.body.classList.toggle('light', settings.appTheme === 'light');
@@ -699,13 +725,7 @@ function applySettings({ persist = true } = {}) {
     });
 
     // A indentação é opção de modelo: aplica também nos arquivos já abertos.
-    for (const model of window.monaco.editor.getModels()) {
-      model.updateOptions({
-        tabSize: settings.tabSize,
-        insertSpaces: settings.tabMode === 'space',
-        detectIndentation: settings.detectIndentation,
-      });
-    }
+    for (const model of window.monaco.editor.getModels()) applyModelOptions(model);
 
   }
 
@@ -860,6 +880,7 @@ function paletteCommands() {
   if (activePath) {
     const name = baseName(activePath);
     commands.push(
+      { title: 'fechar arquivo atual', run: () => closeFile(activePath) },
       { title: 'renomear arquivo atual', run: () => renameEntry({ path: activePath, name, dir: false }) },
       { title: 'excluir arquivo atual', run: () => deleteEntry({ path: activePath, name, dir: false }) },
     );
@@ -1010,17 +1031,138 @@ function startEditor() {
   applySettings({ persist: false });
 }
 
+// ---------------------------------------------------------------------------
+// Abas dos arquivos abertos
+// ---------------------------------------------------------------------------
+/** Monta a barra de abas a partir dos modelos abertos (a ordem do Map é a ordem de abertura). */
+function renderTabs() {
+  els.tabs.innerHTML = '';
+
+  for (const [path, entry] of models) {
+    const dirty = entry.model.getValue() !== entry.saved;
+    const name = baseName(path);
+
+    const tab = document.createElement('div');
+    tab.className = 'tabfile';
+    tab.dataset.path = path;
+    tab.title = path;
+    tab.classList.toggle('active', path === activePath);
+    tab.classList.toggle('dirty', dirty);
+
+    const icon = document.createElement('img');
+    icon.className = 'tabicon';
+    icon.src = iconFor(name, false);
+    icon.alt = '';
+    icon.draggable = false;
+
+    const label = document.createElement('span');
+    label.className = 'tabname';
+    label.textContent = name;
+
+    const dot = document.createElement('span');
+    dot.className = 'tabdot';
+    dot.textContent = '●';
+    dot.hidden = !dirty;
+
+    const close = document.createElement('button');
+    close.className = 'tabclose';
+    close.type = 'button';
+    close.textContent = '×';
+    close.title = 'fechar'; 
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      closeFile(path);
+    });
+
+    tab.append(icon, label, dot, close);
+    tab.addEventListener('click', () => selectFile(path));
+    tab.addEventListener('auxclick', (event) => {
+      // Clique do meio fecha, como no navegador.
+      if (event.button === 1) {
+        event.preventDefault();
+        closeFile(path);
+      }
+    });
+
+    els.tabs.append(tab);
+  }
+
+  els.tabs.hidden = models.size === 0;
+  const active = els.tabs.querySelector('.tabfile.active');
+  if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+/** Atualização barata (a cada tecla): só o estado ativo/sujo das abas. */
+function refreshTabStates() {
+  els.tabs.hidden = models.size === 0;
+
+  for (const tab of els.tabs.children) {
+    const entry = models.get(tab.dataset.path);
+    const dirty = !!entry && entry.model.getValue() !== entry.saved;
+    tab.classList.toggle('active', tab.dataset.path === activePath);
+    tab.classList.toggle('dirty', dirty);
+    const dot = tab.querySelector('.tabdot');
+    if (dot) dot.hidden = !dirty;
+  }
+}
+
+function selectFile(path) {
+  const entry = models.get(path);
+  if (!entry) return;
+
+  activePath = path;
+  view.setModel(entry.model);
+  els.statusfile.textContent = path;
+  state.selectedDir = parentOf(path);
+  view.focus();
+  updateDirty();
+  highlightActiveRow();
+}
+
+async function closeFile(path) {
+  const entry = models.get(path);
+  if (!entry) return;
+
+  if (entry.model.getValue() !== entry.saved) {
+    const ok = await showDialog({
+      title: `Fechar ${baseName(path)}`,
+      message: `${path}\n\nAs alterações não salvas serão perdidas.`,
+      confirmLabel: 'fechar sem salvar',
+      danger: true,
+    });
+    if (!ok) return;
+  }
+
+  models.delete(path);
+
+  if (activePath === path) {
+    const remaining = Array.from(models.keys());
+    activePath = remaining.length ? remaining[remaining.length - 1] : null;
+
+    if (activePath) {
+      view.setModel(models.get(activePath).model);
+      els.statusfile.textContent = activePath;
+      state.selectedDir = parentOf(activePath);
+      view.focus();
+    } else {
+      view.setModel(window.monaco.editor.createModel('', 'plaintext'));
+      els.statusfile.textContent = '';
+    }
+  }
+
+  entry.model.dispose();
+  renderTabs();
+  updateDirty();
+  highlightActiveRow();
+  setStatus(`fechado ${baseName(path)}`);
+}
+
 function updateDirty() {
   const entry = activePath ? models.get(activePath) : null;
   const dirty = !!entry && entry.model.getValue() !== entry.saved;
-  els.tab.hidden = !activePath;
-  els.tab.classList.toggle('dirty', dirty);
+  refreshTabStates();
 
   const name = activePath ? baseName(activePath) : '';
-  els.tabname.textContent = activePath ? `${dirty ? '● ' : ''}${name}` : '';
-  els.tabicon.hidden = !activePath;
-  els.tabicon.src = activePath ? iconFor(name, false) : '';
-
   const label = name || baseName(state.root);
   const glyph = titleGlyph(activePath ? iconIdFor(name, false) : FOLDER_ICON);
   document.title = `${glyph} ${label} — Wincode${dirty ? ' •' : ''}`;
@@ -1029,34 +1171,32 @@ function updateDirty() {
 async function openFile(requestedPath) {
   if (!view) return;
   const path = resolvePath(requestedPath);
+
+  // Já aberto: só troca de aba — não relê o disco nem descarta edições.
+  if (models.has(path)) {
+    selectFile(path);
+    return;
+  }
+
   try {
     const res = await fetch(api('/api/read', { path }));
     if (!res.ok) throw new Error((await res.text()).trim());
     const text = await res.text();
 
-    let entry = models.get(path);
-    if (!entry) {
-      const model = window.monaco.editor.createModel(
-        text,
-        languageFor(path),
-        window.monaco.Uri.file(path.replace(/\\/g, '/')),
-      );
-      entry = { model, saved: text };
-      models.set(path, entry);
-    } else if (entry.model.getValue() !== entry.saved) {
-      if (!confirm(`${baseName(path)} tem alterações não salvas. Descartar?`)) return;
-      entry.model.setValue(text);
-      entry.saved = text;
-    } else {
-      entry.model.setValue(text);
-      entry.saved = text;
-    }
+    const model = window.monaco.editor.createModel(
+      text,
+      languageFor(path),
+      window.monaco.Uri.file(path.replace(/\\/g, '/')),
+    );
+    applyModelOptions(model);
+    models.set(path, { model, saved: text });
 
     activePath = path;
-    view.setModel(entry.model);
+    view.setModel(model);
     view.focus();
     els.statusfile.textContent = path;
     state.selectedDir = parentOf(path);
+    renderTabs();
     highlightActiveRow();
     updateDirty();
     setStatus(`aberto ${baseName(path)}`);
@@ -1323,24 +1463,36 @@ function remapExpanded(from, to) {
 
 /** Renomeação de arquivo/pasta mantém os modelos abertos e o estado "sujo". */
 function migrateModels(from, to) {
-  for (const [path, entry] of Array.from(models)) {
-    if (!sameOrInside(path, from) || normalizePath(path) === normalizePath(to)) continue;
+  const previous = Array.from(models.entries());
+  let nextActive = activePath;
+  models.clear();
+
+  // Reconstrói na mesma ordem para as abas não pularem de lugar.
+  for (const [path, entry] of previous) {
+    if (!sameOrInside(path, from) || normalizePath(path) === normalizePath(to)) {
+      models.set(path, entry);
+      continue;
+    }
+
     const nextPath = to + path.slice(from.length);
     const model = window.monaco.editor.createModel(
       entry.model.getValue(),
       languageFor(nextPath),
       window.monaco.Uri.file(nextPath.replace(/\\/g, '/')),
     );
-    const wasActive = activePath === path;
-    models.delete(path);
+    applyModelOptions(model);
     models.set(nextPath, { model, saved: entry.saved });
-    if (wasActive) {
-      activePath = nextPath;
+
+    if (activePath === path) {
+      nextActive = nextPath;
       view.setModel(model);
       els.statusfile.textContent = nextPath;
     }
     entry.model.dispose();
   }
+
+  activePath = nextActive;
+  renderTabs();
   updateDirty();
 }
 
@@ -1352,12 +1504,12 @@ function dropModelsUnder(target) {
     models.delete(path);
     if (wasActive) {
       activePath = null;
-      if (view) view.setModel(window.monaco.editor.createModel('', 'plaintext'));
+      if (view)      view.setModel(window.monaco.editor.createModel('', 'plaintext'));
       els.statusfile.textContent = '';
-      els.tab.hidden = true;
     }
     entry.model.dispose();
   }
+  renderTabs();
   updateDirty();
 }
 
@@ -1712,7 +1864,7 @@ function resetWorkspace(info) {
   models.clear();
   activePath = null;
   els.statusfile.textContent = '';
-  els.tab.hidden = true;
+  renderTabs();
 
   // Troca o modelo ativo antes de descartar os antigos (evita modelo em uso).
   if (view && window.monaco) {
