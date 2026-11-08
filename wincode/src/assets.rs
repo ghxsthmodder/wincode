@@ -1,9 +1,8 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
-use tao::platform::windows::IconExtWindows;
-use tao::window::Icon;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+use tao::window::Icon;
 
 include!(concat!(env!("OUT_DIR"), "/embedded_assets.rs"));
 
@@ -51,15 +50,21 @@ fn disk_root_override() -> Option<PathBuf> {
     path.is_dir().then_some(path)
 }
 
-/// Ícone da janela. Sempre carregado do disco (nunca embutido): o arquivo
-/// `.ico` com 256×256px tem o tamanho que o Windows exige e não precisa passar
-/// pela tabela de assets embutidos.
+/// Ícone da janela e da barra de tarefas, decodificado do `.ico` que é embutido
+/// no binário — assim o `.exe` continua funcionando sozinho, sem a pasta assets.
+/// `WINCODE_ASSET_DIR` permite substituir o arquivo em desenvolvimento.
 pub(super) fn icon() -> Option<Icon> {
-    let path = if let Ok(dir) = std::env::var("WINCODE_ASSET_DIR") {
-        PathBuf::from(dir).join("icons/wincode.ico")
-    } else {
-        PathBuf::from("assets/icons/wincode.ico")
+    let bytes: Cow<'static, [u8]> = match disk_root_override() {
+        Some(root) => Cow::Owned(std::fs::read(root.join("icons/wincode.ico")).ok()?),
+        None => Cow::Borrowed(*embedded().get("icons/wincode.ico")?),
     };
 
-    Icon::from_path(path, None).ok()
+    let dir = ico::IconDir::read(std::io::Cursor::new(bytes.as_ref())).ok()?;
+    let entry = dir
+        .entries()
+        .iter()
+        .filter(|entry| entry.width() >= 32)
+        .max_by_key(|entry| entry.width())?;
+    let image = entry.decode().ok()?;
+    Icon::from_rgba(image.rgba_data().to_vec(), image.width(), image.height()).ok()
 }

@@ -69,6 +69,7 @@ fn api(
         "cd" => cd(param(query, "path"), state),
         "exec" => exec(param(query, "cmd").unwrap_or_default(), state, jobs),
         "poll" => poll(param(query, "id"), jobs),
+        "watch" => watch(body, state),
         "settings" => settings_get(settings),
         "savesettings" => settings_save(body, settings),
         _ => plain(
@@ -155,6 +156,72 @@ fn list(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Bod
         .collect();
 
     json(serde_json::Value::Array(items))
+}
+
+/// Assinaturas de pastas e arquivos, usadas pelo front-end para recarregar
+/// automaticamente o que mudou fora do editor. Recebe um array JSON de
+/// caminhos e devolve `{ caminho: assinatura }`.
+fn watch(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    const MAX_PATHS: usize = 200;
+
+    let requested: Vec<String> = match serde_json::from_slice(body) {
+        Ok(list) => list,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &format!("lista inválida: {err}")),
+    };
+    if requested.len() > MAX_PATHS {
+        return plain(StatusCode::BAD_REQUEST, "caminhos demais na checagem");
+    }
+
+    let guard = state.lock().unwrap();
+    let mut out = serde_json::Map::with_capacity(requested.len());
+    for item in requested {
+        if let Ok(path) = guard.resolve(&item) {
+            out.insert(item, serde_json::Value::String(signature(&path)));
+        }
+    }
+
+    json(serde_json::Value::Object(out))
+}
+
+/// Hash estável e curto do conteúdo de uma pasta (nomes e tipos) ou da
+/// impressão digital de um arquivo (tamanho e mtime).
+fn signature(path: &std::path::Path) -> String {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = DefaultHasher::new();
+    match std::fs::metadata(path) {
+        Ok(meta) if meta.is_dir() => {
+            let mut entries: Vec<String> = Vec::new();
+            if let Ok(read_dir) = std::fs::read_dir(path) {
+                for entry in read_dir.flatten() {
+                    let is_dir = entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false);
+                    entries.push(format!(
+                        "{}{}",
+                        entry.file_name().to_string_lossy(),
+                        if is_dir { "/" } else { "" }
+                    ));
+                }
+            }
+            entries.sort();
+            "d".hash(&mut hasher);
+            entries.hash(&mut hasher);
+        }
+        Ok(meta) => {
+            let modified = meta
+                .modified()
+                .ok()
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|age| age.as_nanos())
+                .unwrap_or(0);
+            "f".hash(&mut hasher);
+            meta.len().hash(&mut hasher);
+            modified.hash(&mut hasher);
+        }
+        Err(_) => return String::new(),
+    }
+
+    format!("{:016x}", hasher.finish())
 }
 
 fn read(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {

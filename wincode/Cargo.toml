@@ -10,10 +10,16 @@ wry = { version = "0.31", default-features = false, features = ["protocol"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
 urlencoding = "2"
 tao = "0.22"
+# Decodifica o wincode.ico embutido para o ícone da janela (single .exe).
+ico = "0.3"
 
 # Diálogo nativo de seleção de pasta (IFileOpenDialog no Windows).
 [target.'cfg(windows)'.dependencies]
 rfd = { version = "0.15", default-features = false }
+
+[build-dependencies]
+# Ícone do .exe no Explorador do Windows (usa rc.exe do toolchain MSVC).
+winresource = "0.1"
 
 [profile.release]
 opt-level = 3

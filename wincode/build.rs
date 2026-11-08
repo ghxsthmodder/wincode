@@ -43,11 +43,31 @@ fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if target_os == "windows" {
         println!("cargo:warning=Alvo Windows: interface no WebView2 do sistema (já presente no Windows 10/11).");
+        embed_exe_icon(&manifest_dir);
     } else {
         println!(
             "cargo:warning=Alvo {target_os}: o Wry usa WebKitGTK (pkg-config, libgtk-3-dev, libwebkit2gtk-4.1-dev)."
         );
     }
+}
+
+/// Ícone do `.exe` no Explorador do Windows. Precisa rodar no host Windows,
+/// onde o `rc.exe` do toolchain MSVC está disponível; em cross-compile é ignorado.
+fn embed_exe_icon(manifest_dir: &Path) {
+    let icon = manifest_dir.join("assets/icons/wincode.ico");
+    println!("cargo:rerun-if-changed={}", icon.display());
+
+    #[cfg(windows)]
+    {
+        let mut resource = winresource::WindowsResource::new();
+        resource.set_icon(&icon);
+        if let Err(err) = resource.compile() {
+            println!("cargo:warning=não foi possível embutir o ícone do .exe: {err}");
+        }
+    }
+
+    #[cfg(not(windows))]
+    let _ = icon;
 }
 
 fn collect(root: &Path, dir: &Path, out: &mut Vec<(String, PathBuf)>) {

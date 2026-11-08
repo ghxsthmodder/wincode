@@ -63,11 +63,13 @@
   }
   .titlebar button:hover { background: rgba(255,255,255,.06); }
 
-  .panels { display: grid; grid-template-columns: var(--sidebar-width) 1fr; min-height: 0; }
+  .panels { display: flex; min-height: 0; }
+  .main { flex: 1 1 0; min-width: 0; }
   .sidebar {
+    flex: 0 0 var(--sidebar-width); width: var(--sidebar-width);
     background: var(--panel);
     border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; min-height: 0;
+    display: flex; flex-direction: column; min-height: 0; min-width: 0;
   }
   .panel-title {
     display: flex; align-items: center; gap: 6px;
@@ -94,11 +96,12 @@
   .row .name { overflow: hidden; text-overflow: ellipsis; }
   .row.dir .name { color: var(--accent); }
 
-  .main { display: grid; grid-template-rows: var(--editor-head-height) 1fr var(--terminal-height); min-height: 0; background: var(--surface); }
+  .main { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
   .editor-head {
     display: flex; align-items: center; gap: 8px; padding: 0 12px;
     background: var(--panel); border-bottom: 1px solid var(--border);
     font-size: 12px; color: var(--muted);
+    flex: 0 0 var(--editor-head-height);
     height: var(--editor-head-height);
     overflow: hidden;
   }
@@ -128,10 +131,11 @@
   }
   .tabfile:hover .tabclose, .tabfile.active .tabclose { opacity: .65; }
   .tabfile .tabclose:hover { opacity: 1; background: rgba(127,127,127,.22); }
-  .editor { min-height: 0; position: relative; }
+  .editor { flex: 1 1 0; min-height: 0; position: relative; }
 
   .terminal {
-    display: flex; flex-direction: column; min-height: 0;
+    display: flex; flex-direction: column; flex: 0 0 var(--terminal-height);
+    height: var(--terminal-height); min-height: 0;
     border-top: 1px solid var(--border); background: #0a0c11;
   }
   .terminal-head {
@@ -170,21 +174,26 @@
   :root { --editor-head-height: 30px; --terminal-height: 210px; }
 
   .panels .resize-handle {
-    position: relative; z-index: 5; height: 100%; width: 6px; cursor: ew-resize; background: var(--border);
+    position: relative; z-index: 5; flex: 0 0 6px; height: 100%; width: 6px; cursor: ew-resize; background: var(--border);
   }
   .panels .resize-handle::before {
     content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
     background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
   }
   .main .resize-handle.vert {
-    position: relative; z-index: 5; width: 100%; height: 6px; cursor: ns-resize; background: var(--border);
+    position: relative; z-index: 5; flex: 0 0 6px; width: 100%; height: 6px; cursor: ns-resize; background: var(--border);
   }
   .main .resize-handle.vert::before {
     content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
     background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
   }
+  .panels.hidden-sidebar .sidebar,
   .panels.hidden-sidebar .resize-handle { display: none; }
+  .main.hidden-terminal .terminal,
   .main.hidden-terminal .resize-handle.vert { display: none; }
+  .main.hidden-tabs { --editor-head-height: 0px; }
+  .main.hidden-tabs .editor-head { display: none; }
+  .titlebar button.off { opacity: .45; }
   .ctxmenu {
     position: fixed; z-index: 50; min-width: 170px; padding: 4px;
     background: var(--surface); border: 1px solid var(--border);
@@ -293,12 +302,14 @@
       <button id="btnopenfolder" title="Abrir outra pasta">abrir pasta</button>
       <button id="btnopenfile" title="Abrir arquivo">abrir arquivo</button>
       <button id="btnrefresh" title="Recarregar a árvore de arquivos">recarregar</button>
+      <button id="btntogglesidebar" title="Mostrar/ocultar explorador (Ctrl+B)">explorador</button>
+      <button id="btntoggleterminal" title="Mostrar/ocultar terminal (Ctrl+J)">terminal</button>
       <button id="btnsettings" title="Configurações (Ctrl+,)">⚙ configurações</button>
     </header>
 
     <div class="panels">
       <div class="resize-handle" id="sidebar-resize" title="Arraste para redimensionar o explorador"></div>
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="panel-title">
           <span>Explorador</span>
           <span class="spacer"></span>
@@ -345,7 +356,7 @@
       <p>Escolha uma pasta de projeto ou um arquivo para começar.</p>
       <div class="welcome-actions">
         <button id="welcomefolder" type="button" class="primary">abrir pasta…</button>
-        <button id="welcome file" type="button">abrir arquivo…</button>
+        <button id="welcomefile" type="button">abrir arquivo…</button>
       </div>
     </div>
   </div>
@@ -537,6 +548,9 @@ const els = {
   cmdinput: $('cmdinput'),
   welcome: $('welcome'),
   sidebar: $('sidebar'),
+  panels: document.querySelector('.panels'),
+  main: document.querySelector('.main'),
+  terminal: document.querySelector('.terminal'),
   prompt: $('prompt'),
   shellcwd: $('shellcwd'),
   rootlabel: $('rootlabel'),
@@ -663,6 +677,7 @@ const SETTINGS_DEFAULTS = {
   showSidebar: true,
   showTabs: true,
   showTerminal: true,
+  terminalHeight: 210,
   terminalFontSize: 12.5,
 };
 
@@ -709,6 +724,7 @@ const SETTINGS_FIELDS = {
   showSidebar: 'set-showsidebar',
   showTabs: 'set-showtabs',
   showTerminal: 'set-showterminal',
+  terminalHeight: 'set-terminalheight',
   terminalFontSize: 'set-termfont',
 };
 
@@ -792,12 +808,17 @@ function applySettings({ persist = true } = {}) {
   root.setProperty('--sidebar-width', `${settings.sidebarWidth}px`);
   root.setProperty('--term-font-size', `${settings.terminalFontSize}px`);
   root.setProperty('--terminal-height', `${settings.terminalHeight}px`);
+  // A largura/altura vêm das variáveis CSS; estilos inline são só do arrasto.
+  els.sidebar.style.width = '';
+  els.sidebar.style.flexBasis = '';
+  els.terminal.style.height = '';
   els.tree.classList.toggle('no-icons', !settings.treeIcons);
-  els.sidebar.classList.toggle('hidden-sidebar', !settings.showSidebar);
-  els.tabs.classList.toggle('hidden', !settings.showTabs);
-  els.terminal.classList.toggle('hidden-terminal', !settings.showTerminal);
-  if (settings.showTabs) els.tabs.hidden = false;
-  if (settings.showTerminal) els.terminal.hidden = false;
+  els.panels.classList.toggle('hidden-sidebar', !settings.showSidebar);
+  els.main.classList.toggle('hidden-tabs', !settings.showTabs);
+  els.main.classList.toggle('hidden-terminal', !settings.showTerminal);
+  $('btntogglesidebar').classList.toggle('off', !settings.showSidebar);
+  $('btntoggleterminal').classList.toggle('off', !settings.showTerminal);
+  if (typeof view !== 'undefined' && view) view.layout();
 
   if (window.monaco && view) {
     window.monaco.editor.setTheme(settings.theme);
@@ -909,6 +930,9 @@ function toggleSetting(key) {
   setSetting(key, !settings[key]);
 }
 
+const toggleSidebar = () => toggleSetting('showSidebar');
+const toggleTerminal = () => toggleSetting('showTerminal');
+
 function resetSettings() {
   settings = { ...SETTINGS_DEFAULTS };
   applySettings();
@@ -938,6 +962,7 @@ function resizeSidebar(event) {
   const max = parseInt(getComputedStyle(els.sidebar).maxWidth, 10) || 520;
   const value = Math.min(max, Math.max(min, next));
   els.sidebar.style.width = `${value}px`;
+  els.sidebar.style.flexBasis = `${value}px`;
   setSetting('sidebarWidth', value);
 }
 
@@ -993,6 +1018,9 @@ function paletteCommands() {
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
     { title: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
     { title: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+    { title: `${settings.showSidebar ? 'ocultar' : 'mostrar'} explorador`, hint: 'Ctrl+B', run: toggleSidebar },
+    { title: `${settings.showTerminal ? 'ocultar' : 'mostrar'} terminal`, hint: 'Ctrl+J', run: toggleTerminal },
+    { title: `${settings.showTabs ? 'ocultar' : 'mostrar'} abas de arquivo`, run: () => toggleSetting('showTabs') },
     { title: 'focar terminal', run: () => els.cmdinput.focus() },
     { title: 'limpar terminal', run: () => { els.termout.textContent = ''; } },
     {
@@ -2015,6 +2043,77 @@ async function refreshTree() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Recarregamento automático (pastas e arquivos alterados fora do editor)
+// ---------------------------------------------------------------------------
+let watchSignatures = new Map();
+let watchBusy = false;
+
+function watchPaths() {
+  const paths = new Set();
+  if (state.root && !state.selectionRequired) paths.add(state.root);
+  for (const path of state.expanded) paths.add(path);
+  for (const path of models.keys()) paths.add(path);
+  return Array.from(paths).slice(0, 200);
+}
+
+/** Relê do disco um arquivo aberto, desde que não haja edições pendentes. */
+async function reloadFileFromDisk(path) {
+  const entry = models.get(path);
+  if (!entry || entry.model.getValue() !== entry.saved) return;
+
+  try {
+    const res = await fetch(api('/api/read', { path }));
+    if (!res.ok) return;
+    const text = await res.text();
+    if (text === entry.model.getValue()) {
+      entry.saved = text;
+      return;
+    }
+    entry.saved = text;
+    if (path === activePath && view) {
+      const position = view.getPosition();
+      entry.model.setValue(text);
+      if (position) view.setPosition(position);
+    } else {
+      entry.model.setValue(text);
+    }
+    updateDirty();
+    setStatus(`recarregado ${baseName(path)}`);
+  } catch {
+    // Arquivo removido ou temporariamente bloqueado: a próxima checagem tenta de novo.
+  }
+}
+
+async function watchTick() {
+  if (watchBusy || state.selectionRequired || !state.root) return;
+  const paths = watchPaths();
+  if (!paths.length) return;
+
+  watchBusy = true;
+  try {
+    const next = await apiJson('/api/watch', {
+      method: 'POST',
+      body: JSON.stringify(paths),
+    });
+
+    let treeChanged = false;
+    for (const [path, signature] of Object.entries(next)) {
+      const previous = watchSignatures.get(path);
+      if (previous === undefined || previous === signature) continue;
+      if (path === state.root || state.expanded.has(path)) treeChanged = true;
+      else if (models.has(path)) await reloadFileFromDisk(path);
+    }
+
+    watchSignatures = new Map(Object.entries(next));
+    if (treeChanged) await refreshTree();
+  } catch {
+    // A checagem é silenciosa: uma falha isolada não deve poluir a barra de status.
+  } finally {
+    watchBusy = false;
+  }
+}
+
 function resetWorkspace(info) {
   state.root = info.root;
   state.cwd = info.cwd || info.root;
@@ -2024,6 +2123,7 @@ function resetWorkspace(info) {
   updatePrompt();
   state.selectedDir = state.root;
   state.expanded.clear();
+  watchSignatures = new Map();
 
   const previous = Array.from(models.values());
   models.clear();
@@ -2208,9 +2308,11 @@ function bindTerminal() {
   $('btnclear').addEventListener('click', () => { els.termout.textContent = ''; });
   $('btnrefresh').addEventListener('click', () => { refreshTree(); });
   $('btnopenfolder').addEventListener('click', chooseFolder);
+  $('btntogglesidebar').addEventListener('click', toggleSidebar);
+  $('btntoggleterminal').addEventListener('click', toggleTerminal);
   $('btnopenfile').addEventListener('click', chooseFile);
   $('welcomefolder').addEventListener('click', chooseFolder);
-  $('welcome file').addEventListener('click', chooseFile);
+  $('welcomefile').addEventListener('click', chooseFile);
 
   $('btnnewfile').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'file'));
   $('btnnewfolder').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'dir'));
@@ -2247,6 +2349,14 @@ function bindTerminal() {
       event.preventDefault();
       saveActiveFile();
     }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'b') {
+      event.preventDefault();
+      toggleSidebar();
+    }
+    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'j') {
+      event.preventDefault();
+      toggleTerminal();
+    }
   });
 }
 
@@ -2280,6 +2390,7 @@ function bindTerminal() {
       updateDirty();
       els.cmdinput.focus();
     }
+    setInterval(watchTick, 2000);
   } catch (err) {
     setStatus('falha na inicialização');
     els.editorEl.textContent = '';

@@ -15,6 +15,8 @@ Escopo: **Windows x64**, distribuição em **um único `.exe`** (~30 MB, sem pas
   via `include_bytes!` gerado pelo `build.rs`.
 - **Comunicação**: o front-end fala com o Rust por um protocolo customizado (`editor://localhost`),
   que serve os assets e uma API de arquivos/terminal. Nada de porta TCP aberta.
+- **Ícone do app**: `assets/icons/wincode.ico` é embutido no binário e usado na janela, na
+  barra de tarefas e (no build MSVC) como ícone do próprio `.exe` no Explorador do Windows.
 - **Ícones**: o explorador usa um subconjunto do [Material Icon Theme](https://github.com/material-extensions/vscode-material-icon-theme)
   (o mesmo conjunto do VSCode). São SVGs avulsos em `assets/icons/`, embutidos no `.exe` — nada é
   carregado da internet em runtime.
@@ -66,9 +68,14 @@ O WebView2 é o único componente do sistema (já vem no Windows 10/11; há o
 ## Uso
 
 ```powershell
-wincode.exe            # abre o diretório atual
-wincode.exe C:\projetos\meu-app
+wincode.exe                                   # mostra a tela inicial de seleção
+wincode.exe C:\projetos\meu-app               # abre a pasta
+wincode.exe C:\projetos\meu-app\src\main.rs  # abre a pasta do arquivo e o arquivo
 ```
+
+Sem argumentos, o editor **não lista o diretório atual**: abre uma tela inicial para
+escolher uma pasta ou um arquivo. Ao escolher um arquivo, a pasta dele vira a raiz do
+projeto e o arquivo já abre em uma aba. Cancelar o diálogo mantém a tela inicial.
 
 Também é possível definir a pasta por variável de ambiente:
 
@@ -76,8 +83,28 @@ Também é possível definir a pasta por variável de ambiente:
 set WINCODE_ROOT=C:\projetos\meu-app
 ```
 
-O botão **abrir pasta** na barra superior abre o diálogo nativo do Windows
-(`IFileOpenDialog` via crate `rfd`) e troca a raiz do projeto sem reiniciar o editor.
+Os botões **abrir pasta** e **abrir arquivo** na barra superior abrem o diálogo nativo
+do Windows (`IFileOpenDialog` via crate `rfd`) e trocam a raiz do projeto sem reiniciar
+o editor.
+
+## Painéis
+
+O explorador e o terminal podem ser redimensionados e ocultados:
+
+- arraste a alça vertical entre a árvore e o editor para mudar a largura do explorador
+  (180–520 px); arraste a alça horizontal acima do terminal para mudar a altura (100–400 px)
+- **Ctrl+B** mostra/oculta o explorador; **Ctrl+J** mostra/oculta o terminal
+- os botões **explorador** e **terminal** na barra superior fazem o mesmo, e o painel
+  de configurações traz as opções de exibição e as medidas exatas
+
+Largura, altura e visibilidade ficam salvas no JSON de configurações.
+
+## Recarregamento automático
+
+A cada ~2 segundos o editor confere a pasta raiz, as pastas expandidas e os arquivos
+abertos. Quando um arquivo ou pasta é criado, renomeado ou removido fora do editor, a
+árvore se atualiza sozinha; arquivos abertos **sem alterações pendentes** são relidos do
+disco. Abas com edições não salvas nunca são sobrescritas — salve ou descarte antes.
 
 ## Abas
 
@@ -116,7 +143,8 @@ altura da linha, indentação (espaços ou tabulação + largura), detecção da
 do arquivo, quebra de linha, números de linha, espaços em branco visíveis, estilo do
 cursor, minimapa, rolagem suave e **salvar automaticamente** (~1s após parar de digitar)
 - **Interface**: tema claro/escuro (independente do tema do editor), tamanho da fonte da
-interface, largura do explorador e exibição dos ícones da árvore
+interface, largura do explorador, altura do terminal, exibição dos ícones da árvore e
+visibilidade do explorador, das abas e do terminal
 - **Terminal**: tamanho da fonte
 - **restaurar padrões** devolve tudo ao inicial
 
@@ -140,7 +168,7 @@ para filtrar (casamento por subsequência: `cfg` acha *configurações*), navegu
 Comandos disponíveis:
 
 - **arquivo**: salvar, renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
-- **projeto**: abrir outra pasta, focar e limpar o terminal
+- **projeto**: abrir pasta/arquivo, mostrar/ocultar explorador, abas e terminal, focar e limpar o terminal
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
   ícones da árvore e salvamento automático; restaurar padrões
@@ -153,6 +181,17 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+S` — salva o arquivo aberto
 - `Ctrl+,` — abre/fecha as configurações (`Esc` também fecha)
 - `Ctrl+Shift+P` — abre a paleta de comandos (`Esc` também fecha)
+- `Ctrl+B` — mostra/oculta o explorador
+- `Ctrl+J` — mostra/oculta o terminal
+
+## Linguagens
+
+O realce de sintaxe do Monaco cobre dezenas de linguagens, entre elas **Lua** (`.lua`),
+Rust, JavaScript/TypeScript (incluindo JSX/TSX), Python, Go, C/C++, C#, Java, Kotlin,
+Swift, Dart, Scala, Ruby, PHP, Shell, PowerShell, Bat, HTML/CSS/SCSS/Less, JSON, YAML,
+TOML/INI, Markdown/MDX, XML, SQL, GraphQL, Dockerfile, Terraform/HCL, Elixir, Erlang,
+Haskell, Clojure, Julia, Perl, R, Objective-C, protobuf, Solidity e outras.
+Extensões desconhecidas abrem como texto puro.
 - Terminal: qualquer comando (`dir`, `git status`, `cargo build`…) executa via `cmd.exe /C`
   no diretório atual do terminal, com saída em streaming. O processo é criado com
   `CREATE_NO_WINDOW`, então **nenhuma janela de console aparece** sobre o editor
