@@ -51,5 +51,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wincode-windows-x64
-          path: wincode/target/x86_64-pc-windows-msvc/wincode.exe
+          path: wincode/target/x86_64-pc-windows-msvc/debug/wincode.exe
           if-no-files-found: error
