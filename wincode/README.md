@@ -118,11 +118,28 @@ configuração do usuário:
 Valores fora da faixa ou desconhecidos são ignorados na leitura, então editar o arquivo
 à mão não quebra a interface.
 
+## Paleta de comandos
+
+`Ctrl+Shift+P` abre a paleta, que reaproveita o mesmo modal das configurações. Digite
+para filtrar (casamento por subsequência: `cfg` acha *configurações*), navegue com
+`↑`/`↓` e execute com `Enter`.
+
+Comandos disponíveis:
+
+- **arquivo**: salvar, renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
+- **projeto**: abrir outra pasta, focar e limpar o terminal
+- **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
+  indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
+  ícones da árvore e salvamento automático; restaurar padrões
+
+Os toggles aparecem com o rótulo do próximo estado (ex.: *desligar minimapa*) e
+persistem na hora, do mesmo jeito que no painel.
+
 ## Atalhos e comandos
 
 - `Ctrl+S` — salva o arquivo aberto
 - `Ctrl+,` — abre/fecha as configurações (`Esc` também fecha)
-- `Ctrl+Shift+P` — não implementado ainda
+- `Ctrl+Shift+P` — abre a paleta de comandos (`Esc` também fecha)
 - Terminal: qualquer comando (`dir`, `git status`, `cargo build`…) executa via `cmd.exe /C`
   no diretório atual do terminal, com saída em streaming. O processo é criado com
   `CREATE_NO_WINDOW`, então **nenhuma janela de console aparece** sobre o editor

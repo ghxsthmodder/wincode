@@ -192,6 +192,25 @@
   }
   .settings .body { overflow: auto; padding-right: 6px; }
   .settings .actions .spacer { flex: 1; }
+
+  /* Paleta de comandos: mesmo overlay/dialog das configurações. */
+  .palette { z-index: 70; align-items: start; padding-top: 10vh; }
+  .palette-box { width: 560px; padding: 0; overflow: hidden; }
+  .palette-box input {
+    width: 100%; padding: 12px 14px; font-size: 14px;
+    background: transparent; border: none; border-bottom: 1px solid var(--border);
+    color: var(--text); outline: none;
+  }
+  .palette-box input::placeholder { color: var(--muted); }
+  .palettelist { max-height: 340px; overflow: auto; padding: 6px; }
+  .palette-item {
+    display: flex; align-items: center; gap: 12px;
+    padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  }
+  .palette-item .hint { margin-left: auto; font-size: 11px; }
+  .palette-item.active { background: rgba(137,180,250,.18); }
+  body.light .palette-item.active { background: rgba(37,99,235,.14); }
+  .palette-empty { padding: 12px; text-align: center; }
   .settings h3 {
     margin: 14px 0 2px; font-size: 10px; text-transform: uppercase;
     letter-spacing: .1em; color: var(--muted);
@@ -416,6 +435,13 @@
     </div>
   </div>
 
+  <div id="palette" class="overlay palette" hidden>
+    <div class="dialog palette-box">
+      <input id="paletteinput" type="text" placeholder="digite um comando…" autocomplete="off" spellcheck="false">
+      <div id="palettelist" class="palettelist"></div>
+    </div>
+  </div>
+
 <script type="module">
 const $ = (id) => document.getElementById(id);
 
@@ -424,6 +450,9 @@ const els = {
   editorEl: $('editor'),
   tab: $('tab'),
   settings: $('settings'),
+  palette: $('palette'),
+  paletteinput: $('paletteinput'),
+  palettelist: $('palettelist'),
   tabicon: $('tabicon'),
   tabname: $('tabname'),
   termout: $('termout'),
@@ -726,12 +755,7 @@ function bindSettings() {
   $('btnsettings').addEventListener('click', openSettings);
   $('setclose').addEventListener('click', closeSettings);
 
-  $('setreset').addEventListener('click', () => {
-    settings = { ...SETTINGS_DEFAULTS };
-    fillSettingsForm();
-    applySettings();
-    setStatus('configurações restauradas ao padrão');
-  });
+  $('setreset').addEventListener('click', resetSettings);
 
   const onChange = () => {
     settings = readSettingsForm();
@@ -753,6 +777,214 @@ function scheduleAutoSave() {
     const entry = activePath ? models.get(activePath) : null;
     if (entry && entry.model.getValue() !== entry.saved) saveActiveFile();
   }, 900);
+}
+
+// ---------------------------------------------------------------------------
+// Paleta de comandos (Ctrl+Shift+P)
+// ---------------------------------------------------------------------------
+const MONACO_THEME_CYCLE = ['vs-dark', 'vs', 'hc-black', 'hc-light'];
+
+function setSetting(key, value) {
+  settings = { ...settings, [key]: value };
+  applySettings();
+  if (!els.settings.hidden) fillSettingsForm();
+}
+
+function toggleSetting(key) {
+  setSetting(key, !settings[key]);
+}
+
+function resetSettings() {
+  settings = { ...SETTINGS_DEFAULTS };
+  applySettings();
+  if (!els.settings.hidden) fillSettingsForm();
+  setStatus('configurações restauradas ao padrão');
+}
+
+function paletteCommands() {
+  const commands = [
+    { title: 'abrir configurações', hint: 'Ctrl+,', run: openSettings },
+    { title: 'salvar arquivo', hint: 'Ctrl+S', run: saveActiveFile },
+    { title: 'abrir outra pasta…', run: chooseFolder },
+    { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
+    { title: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
+    { title: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+    { title: 'focar terminal', run: () => els.cmdinput.focus() },
+    { title: 'limpar terminal', run: () => { els.termout.textContent = ''; } },
+    {
+      title: `${settings.minimap ? 'ocultar' : 'mostrar'} minimapa`,
+      run: () => toggleSetting('minimap'),
+    },
+    {
+      title: `${settings.wordWrap === 'on' ? 'desligar' : 'ligar'} quebra de linha`,
+      run: () => setSetting('wordWrap', settings.wordWrap === 'on' ? 'off' : 'on'),
+    },
+    {
+      title: `${settings.lineNumbers === 'on' ? 'ocultar' : 'mostrar'} números de linha`,
+      run: () => setSetting('lineNumbers', settings.lineNumbers === 'on' ? 'off' : 'on'),
+    },
+    {
+      title: `indentação: usar ${settings.tabMode === 'space' ? 'tabulação' : 'espaços'}`,
+      run: () => setSetting('tabMode', settings.tabMode === 'space' ? 'tab' : 'space'),
+    },
+    {
+      title: 'aumentar fonte do editor',
+      run: () => setSetting('fontSize', clamp(settings.fontSize + 1, ...SETTING_RANGES.fontSize)),
+    },
+    {
+      title: 'diminuir fonte do editor',
+      run: () => setSetting('fontSize', clamp(settings.fontSize - 1, ...SETTING_RANGES.fontSize)),
+    },
+    {
+      title: `próximo tema do editor (${settings.theme})`,
+      run: () => {
+        const next = MONACO_THEME_CYCLE[(MONACO_THEME_CYCLE.indexOf(settings.theme) + 1) % MONACO_THEME_CYCLE.length];
+        setSetting('theme', next);
+      },
+    },
+    {
+      title: `tema da interface: ${settings.appTheme === 'dark' ? 'claro' : 'escuro'}`,
+      run: () => setSetting('appTheme', settings.appTheme === 'dark' ? 'light' : 'dark'),
+    },
+    {
+      title: `${settings.treeIcons ? 'ocultar' : 'mostrar'} ícones da árvore`,
+      run: () => toggleSetting('treeIcons'),
+    },
+    {
+      title: `${settings.autoSave ? 'desligar' : 'ligar'} salvar automaticamente`,
+      run: () => toggleSetting('autoSave'),
+    },
+    { title: 'restaurar configurações padrão', run: resetSettings },
+  ];
+
+  if (activePath) {
+    const name = baseName(activePath);
+    commands.push(
+      { title: 'renomear arquivo atual', run: () => renameEntry({ path: activePath, name, dir: false }) },
+      { title: 'excluir arquivo atual', run: () => deleteEntry({ path: activePath, name, dir: false }) },
+    );
+  }
+
+  return commands;
+}
+
+/** Casamento por subsequência, como nas paletas do VSCode: "cfg" acha "configurações". */
+function fuzzyScore(text, query) {
+  const haystack = text.toLowerCase();
+  let index = 0;
+  for (const char of query.toLowerCase()) {
+    index = haystack.indexOf(char, index);
+    if (index === -1) return -1;
+    index += 1;
+  }
+  return index;
+}
+
+let paletteItems = [];
+let paletteIndex = 0;
+
+function renderPalette() {
+  const query = els.paletteinput.value.trim();
+  const all = paletteCommands();
+  paletteItems = query
+    ? all
+        .map((command, order) => ({ command, order, score: fuzzyScore(command.title, query) }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => a.score - b.score || a.order - b.order)
+        .map((entry) => entry.command)
+    : all;
+
+  paletteIndex = 0;
+  els.palettelist.innerHTML = '';
+
+  if (!paletteItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'palette-empty dim';
+    empty.textContent = 'nenhum comando encontrado';
+    els.palettelist.append(empty);
+    return;
+  }
+
+  paletteItems.forEach((command, index) => {
+    const row = document.createElement('div');
+    row.className = index === 0 ? 'palette-item active' : 'palette-item';
+
+    const title = document.createElement('span');
+    title.textContent = command.title;
+    row.append(title);
+
+    if (command.hint) {
+      const hint = document.createElement('span');
+      hint.className = 'hint dim';
+      hint.textContent = command.hint;
+      row.append(hint);
+    }
+
+    row.addEventListener('click', () => runPaletteCommand(index));
+    els.palettelist.append(row);
+  });
+}
+
+function movePalette(delta) {
+  if (!paletteItems.length) return;
+  paletteIndex = (paletteIndex + delta + paletteItems.length) % paletteItems.length;
+  Array.from(els.palettelist.children).forEach((row, index) => {
+    row.classList.toggle('active', index === paletteIndex);
+    if (index === paletteIndex) row.scrollIntoView({ block: 'nearest' });
+  });
+}
+
+function runPaletteCommand(index) {
+  const command = paletteItems[index];
+  if (!command) return;
+  closePalette();
+  command.run();
+}
+
+function openPalette() {
+  els.paletteinput.value = '';
+  els.palette.hidden = false;
+  renderPalette();
+  els.paletteinput.focus();
+}
+
+function closePalette() {
+  els.palette.hidden = true;
+}
+
+function bindPalette() {
+  // Fase de captura: o Monaco e o terminal consomem o keydown antes de chegar ao window.
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        openPalette();
+      }
+    },
+    true,
+  );
+
+  els.paletteinput.addEventListener('input', renderPalette);
+  els.paletteinput.addEventListener('keydown', (event) => {
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      movePalette(1);
+    } else if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      movePalette(-1);
+    } else if (event.key === 'Enter') {
+      event.preventDefault();
+      runPaletteCommand(paletteIndex);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      closePalette();
+    }
+  });
+
+  els.palette.addEventListener('pointerdown', (event) => {
+    if (event.target === els.palette) closePalette();
+  });
 }
 
 function startEditor() {
@@ -1653,6 +1885,7 @@ function bindTerminal() {
     if (event.key === 'Escape') {
       closeMenu();
       closeSettings();
+      closePalette();
     }
     if ((event.ctrlKey || event.metaKey) && event.key === ',') {
       event.preventDefault();
@@ -1671,6 +1904,7 @@ function bindTerminal() {
 (async function init() {
   bindTerminal();
   bindSettings();
+  bindPalette();
   try {
     await loadMonaco();
     await loadSettings();
