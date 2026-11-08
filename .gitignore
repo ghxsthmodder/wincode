@@ -1,0 +1,12 @@
+# Build
+codebuff-editor/target/
+
+# Cache do script de preparo do Monaco
+codebuff-editor/.cache/
+
+# Monaco é baixado por `node scripts/prepare-monaco.js` (não versionado)
+codebuff-editor/assets/monaco/
+
+# Sistema
+.DS_Store
+Thumbs.db

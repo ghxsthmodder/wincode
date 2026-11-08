@@ -1,0 +1,643 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>CodeBuff Editor</title>
+<style>
+  :root {
+    --bg: #0d0f14;
+    --panel: #12151d;
+    --surface: #171a23;
+    --border: #262b3a;
+    --text: #cdd6f4;
+    --muted: #6c7086;
+    --accent: #89b4fa;
+    --accent2: #f5c2e7;
+    --danger: #f38ba8;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
+    font-size: 13px;
+    overflow: hidden;
+  }
+  .app { display: grid; grid-template-rows: 34px 1fr 24px; height: 100vh; }
+
+  .titlebar {
+    display: flex; align-items: center; gap: 12px;
+    padding: 0 12px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .brand { color: var(--accent2); font-weight: 600; letter-spacing: .04em; }
+  .rootlabel { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .titlebar button {
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .titlebar button:hover { background: rgba(255,255,255,.06); }
+
+  .panels { display: grid; grid-template-columns: 250px 1fr; min-height: 0; }
+  .sidebar {
+    background: var(--panel);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; min-height: 0;
+  }
+  .panel-title {
+    padding: 8px 12px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
+  }
+  .tree { flex: 1; overflow: auto; padding: 4px 0; }
+  .row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 3px 8px; cursor: pointer; white-space: nowrap;
+    border-left: 2px solid transparent;
+  }
+  .row:hover { background: rgba(255,255,255,.05); }
+  .row.active { background: rgba(137,180,250,.12); border-left-color: var(--accent); }
+  .row .caret { width: 10px; color: var(--muted); font-size: 10px; }
+  .row .icon { width: 16px; text-align: center; font-size: 11px; }
+  .row .name { overflow: hidden; text-overflow: ellipsis; }
+  .row.dir .name { color: var(--accent); }
+
+  .main { display: grid; grid-template-rows: 30px 1fr 210px; min-height: 0; background: var(--surface); }
+  .editor-head {
+    display: flex; align-items: center; gap: 8px; padding: 0 12px;
+    background: var(--panel); border-bottom: 1px solid var(--border);
+    font-size: 12px; color: var(--muted);
+  }
+  .tab { color: var(--text); }
+  .tab.dirty { color: var(--accent2); }
+  .editor { min-height: 0; position: relative; }
+
+  .terminal {
+    display: flex; flex-direction: column; min-height: 0;
+    border-top: 1px solid var(--border); background: #0a0c11;
+  }
+  .terminal-head {
+    display: flex; align-items: center; gap: 10px; padding: 4px 12px;
+    border-bottom: 1px solid var(--border); font-size: 11px;
+    text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+  }
+  .terminal-head .cwd { text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-head .spacer { flex: 1; }
+  .terminal-head button {
+    background: transparent; border: 1px solid var(--border); color: var(--text);
+    border-radius: 4px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .termout {
+    flex: 1; overflow: auto; padding: 8px 12px; margin: 0;
+    font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+    color: var(--text);
+  }
+  .inputline { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
+  .prompt { color: var(--accent); font-family: ui-monospace, monospace; }
+  #cmdinput {
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
+  }
+
+  .statusbar {
+    display: flex; align-items: center; gap: 16px; padding: 0 12px;
+    background: var(--panel); border-top: 1px solid var(--border);
+    color: var(--muted); font-size: 11px;
+  }
+  .statusbar .spacer { flex: 1; }
+  .dim { color: var(--muted); }
+  .pad { padding: 8px 12px; }
+  .error { color: var(--danger); white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar">
+      <span class="brand">CodeBuff</span>
+      <span id="rootlabel" class="rootlabel">carregando…</span>
+      <button id="btnopenfolder" title="Abrir outra pasta">abrir pasta</button>
+      <button id="btnrefresh" title="Recarregar a árvore de arquivos">recarregar</button>
+    </header>
+
+    <div class="panels">
+      <aside class="sidebar">
+        <div class="panel-title">Explorador</div>
+        <div id="tree" class="tree"><div class="dim pad">carregando…</div></div>
+      </aside>
+
+      <main class="main">
+        <div class="editor-head">
+          <span id="tab" class="tab" hidden></span>
+        </div>
+        <div id="editor" class="editor"></div>
+
+        <section class="terminal">
+          <div class="terminal-head">
+            <span>terminal</span>
+            <span id="shellcwd" class="cwd dim"></span>
+            <span class="spacer"></span>
+            <button id="btnclear">limpar</button>
+          </div>
+          <pre id="termout" class="termout"></pre>
+          <div class="inputline">
+            <span id="prompt" class="prompt">&gt;</span>
+            <input id="cmdinput" type="text" spellcheck="false" autocomplete="off" placeholder="dir, git status, cargo build…" />
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <footer class="statusbar">
+      <span id="statusmsg">inicializando…</span>
+      <span class="spacer"></span>
+      <span id="statusfile"></span>
+      <span id="statuspos">Ln 1, Col 1</span>
+    </footer>
+  </div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+
+const els = {
+  tree: $('tree'),
+  editorEl: $('editor'),
+  tab: $('tab'),
+  termout: $('termout'),
+  cmdinput: $('cmdinput'),
+  prompt: $('prompt'),
+  shellcwd: $('shellcwd'),
+  rootlabel: $('rootlabel'),
+  statusmsg: $('statusmsg'),
+  statusfile: $('statusfile'),
+  statuspos: $('statuspos'),
+};
+
+const state = { root: '', cwd: '', running: false, history: [], historyIndex: 0 };
+const models = new Map();
+let view = null;
+let activePath = null;
+
+const api = (path, params) => {
+  if (!params) return path;
+  const query = new URLSearchParams(params).toString();
+  return query ? `${path}?${query}` : path;
+};
+
+const setStatus = (message) => { els.statusmsg.textContent = message; };
+const shortPath = (path) => {
+  const parts = String(path || '').replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts[parts.length - 1] || path;
+};
+const baseName = (path) => String(path || '').replace(/\\/g, '/').split('/').pop() || path;
+const promptText = () => shortPath(state.cwd) + '>';
+
+async function apiJson(url, options) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    const text = (await res.text()).trim();
+    throw new Error(text || `${res.status} ${res.statusText}`);
+  }
+  return res.json();
+}
+
+// ---------------------------------------------------------------------------
+// Monaco
+// ---------------------------------------------------------------------------
+function loadMonaco() {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.src = '/monaco/vs/loader.js';
+    script.onload = () => {
+      try {
+        window.require.config({ paths: { vs: '/monaco/vs' } });
+        window.require(['vs/editor/editor.main'], () => {
+          if (window.monaco) resolve(window.monaco);
+          else reject(new Error('Monaco carregou mas window.monaco não existe'));
+        }, reject);
+      } catch (err) {
+        reject(err);
+      }
+    };
+    script.onerror = () => reject(new Error('falha ao carregar /monaco/vs/loader.js'));
+    document.head.appendChild(script);
+  });
+}
+
+const LANGUAGE_BY_EXT = {
+  rs: 'rust',
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript',
+  html: 'html', htm: 'html',
+  css: 'css', scss: 'scss', less: 'less',
+  json: 'json',
+  md: 'markdown', markdown: 'markdown',
+  toml: 'ini', ini: 'ini',
+  yaml: 'yaml', yml: 'yaml',
+  py: 'python', rb: 'ruby', go: 'go',
+  c: 'c', h: 'c', cpp: 'cpp', cc: 'cpp', hpp: 'cpp',
+  java: 'java', cs: 'csharp', php: 'php', sh: 'shell', bash: 'shell',
+  sql: 'sql', xml: 'xml', svg: 'xml', txt: 'plaintext',
+};
+
+const languageFor = (path) => LANGUAGE_BY_EXT[(path.split('.').pop() || '').toLowerCase()] || 'plaintext';
+
+const isAbsolutePath = (path) => /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(path);
+const resolvePath = (path) => {
+  const value = String(path || '').trim();
+  if (isAbsolutePath(value)) return value;
+  const base = state.cwd.replace(/[\\/]+$/, '');
+  return `${base}/${value.replace(/^\.\//, '')}`;
+};
+
+function startEditor() {
+  const monaco = window.monaco;
+  view = monaco.editor.create(els.editorEl, {
+    value: '',
+    language: 'plaintext',
+    theme: 'vs-dark',
+    automaticLayout: true,
+    minimap: { enabled: false },
+    scrollBeyondLastLine: false,
+    renderLineHighlight: 'line',
+    cursorBlinking: 'smooth',
+    fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+    fontSize: 13,
+    tabSize: 2,
+    padding: { top: 10, bottom: 10 },
+  });
+
+  view.onDidChangeCursorPosition((event) => {
+    els.statuspos.textContent = `Ln ${event.position.lineNumber}, Col ${event.position.column}`;
+  });
+  view.onDidChangeModelContent(updateDirty);
+}
+
+function updateDirty() {
+  const entry = activePath ? models.get(activePath) : null;
+  const dirty = !!entry && entry.model.getValue() !== entry.saved;
+  els.tab.hidden = !activePath;
+  els.tab.classList.toggle('dirty', dirty);
+  els.tab.textContent = activePath ? `${dirty ? '● ' : ''}${baseName(activePath)}` : '';
+  document.title = `CodeBuff Editor — ${baseName(activePath || state.root)}${dirty ? ' •' : ''}`;
+}
+
+async function openFile(requestedPath) {
+  if (!view) return;
+  const path = resolvePath(requestedPath);
+  try {
+    const res = await fetch(api('/api/read', { path }));
+    if (!res.ok) throw new Error((await res.text()).trim());
+    const text = await res.text();
+
+    let entry = models.get(path);
+    if (!entry) {
+      const model = window.monaco.editor.createModel(
+        text,
+        languageFor(path),
+        window.monaco.Uri.file(path.replace(/\\/g, '/')),
+      );
+      entry = { model, saved: text };
+      models.set(path, entry);
+    } else if (entry.model.getValue() !== entry.saved) {
+      if (!confirm(`${baseName(path)} tem alterações não salvas. Descartar?`)) return;
+      entry.model.setValue(text);
+      entry.saved = text;
+    } else {
+      entry.model.setValue(text);
+      entry.saved = text;
+    }
+
+    activePath = path;
+    view.setModel(entry.model);
+    view.focus();
+    els.statusfile.textContent = path;
+    highlightActiveRow();
+    updateDirty();
+    setStatus(`aberto ${baseName(path)}`);
+  } catch (err) {
+    setStatus('erro ao abrir: ' + err.message);
+  }
+}
+
+async function saveActiveFile() {
+  if (!activePath) return;
+  const entry = models.get(activePath);
+  if (!entry) return;
+  try {
+    const res = await fetch(api('/api/write', { path: activePath }), {
+      method: 'POST',
+      body: entry.model.getValue(),
+    });
+    if (!res.ok) throw new Error((await res.text()).trim());
+    entry.saved = entry.model.getValue();
+    updateDirty();
+    setStatus(`salvo ${baseName(activePath)}`);
+  } catch (err) {
+    setStatus('erro ao salvar: ' + err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Árvore de arquivos
+// ---------------------------------------------------------------------------
+function highlightActiveRow() {
+  els.tree.querySelectorAll('.row').forEach((row) => {
+    row.classList.toggle('active', row.dataset.path === activePath);
+  });
+}
+
+function makeNode(item, depth) {
+  const group = document.createElement('div');
+  const row = document.createElement('div');
+  row.className = item.dir ? 'row dir' : 'row';
+  row.dataset.path = item.path;
+  row.style.paddingLeft = `${8 + depth * 12}px`;
+
+  const caret = document.createElement('span');
+  caret.className = 'caret';
+  caret.textContent = item.dir ? '▸' : '';
+
+  const icon = document.createElement('span');
+  icon.className = 'icon';
+  icon.textContent = item.dir ? '▣' : '·';
+
+  const name = document.createElement('span');
+  name.className = 'name';
+  name.textContent = item.name;
+  name.title = item.path;
+
+  row.append(caret, icon, name);
+  group.append(row);
+
+  if (item.dir) {
+    const children = document.createElement('div');
+    children.hidden = true;
+    group.append(children);
+    let loaded = false;
+
+    row.addEventListener('click', async () => {
+      const willOpen = children.hidden;
+      children.hidden = !willOpen;
+      row.classList.toggle('open', willOpen);
+      caret.textContent = willOpen ? '▾' : '▸';
+      if (!willOpen || loaded) return;
+
+      loaded = true;
+      const loading = document.createElement('div');
+      loading.className = 'dim pad';
+      loading.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
+      loading.textContent = 'carregando…';
+      children.append(loading);
+
+      try {
+        const items = await apiJson(api('/api/ls', { path: item.path }));
+        children.innerHTML = '';
+        if (!items.length) {
+          const empty = document.createElement('div');
+          empty.className = 'dim pad';
+          empty.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
+          empty.textContent = '(vazia)';
+          children.append(empty);
+        } else {
+          items.forEach((child) => children.append(makeNode(child, depth + 1)));
+        }
+      } catch (err) {
+        children.innerHTML = '';
+        const failed = document.createElement('div');
+        failed.className = 'error pad';
+        failed.textContent = err.message;
+        children.append(failed);
+        loaded = false;
+      }
+    });
+  } else {
+    row.addEventListener('click', () => openFile(item.path));
+  }
+
+  return group;
+}
+
+async function refreshTree() {
+  els.tree.innerHTML = '';
+  try {
+    const items = await apiJson(api('/api/ls', { path: state.root }));
+    if (!items.length) {
+      const empty = document.createElement('div');
+      empty.className = 'dim pad';
+      empty.textContent = 'pasta vazia';
+      els.tree.append(empty);
+    } else {
+      items.forEach((item) => els.tree.append(makeNode(item, 0)));
+    }
+    highlightActiveRow();
+  } catch (err) {
+    const failed = document.createElement('div');
+    failed.className = 'error pad';
+    failed.textContent = 'erro ao listar: ' + err.message;
+    els.tree.append(failed);
+  }
+}
+
+function resetWorkspace(info) {
+  state.root = info.root;
+  state.cwd = info.cwd || info.root;
+  els.rootlabel.textContent = state.root;
+  els.rootlabel.title = state.root;
+  updatePrompt();
+
+  const previous = Array.from(models.values());
+  models.clear();
+  activePath = null;
+  els.statusfile.textContent = '';
+  els.tab.hidden = true;
+
+  // Troca o modelo ativo antes de descartar os antigos (evita modelo em uso).
+  if (view && window.monaco) {
+    view.setModel(window.monaco.editor.createModel('', 'plaintext'));
+  }
+  for (const entry of previous) entry.model.dispose();
+
+  updateDirty();
+  els.tree.innerHTML = '<div class="dim pad">carregando…</div>';
+}
+
+async function chooseFolder() {
+  setStatus('escolhendo pasta…');
+  try {
+    const result = await apiJson('/api/pickfolder');
+    if (result.canceled || !result.root) {
+      setStatus('pronto');
+      return;
+    }
+    resetWorkspace(result);
+    await refreshTree();
+    setStatus('pasta aberta: ' + shortPath(result.root));
+    els.cmdinput.focus();
+  } catch (err) {
+    setStatus('erro ao abrir pasta: ' + err.message);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Terminal
+// ---------------------------------------------------------------------------
+function termWrite(text) {
+  if (!text) return;
+  els.termout.append(document.createTextNode(text));
+  els.termout.scrollTop = els.termout.scrollHeight;
+}
+
+function updatePrompt() {
+  els.prompt.textContent = promptText();
+  els.shellcwd.textContent = state.cwd;
+}
+
+async function changeDir(target) {
+  try {
+    const { cwd } = await apiJson(api('/api/cd', { path: target }));
+    state.cwd = cwd;
+    updatePrompt();
+    termWrite(cwd + '\n');
+  } catch (err) {
+    termWrite(`erro: ${err.message}\n`);
+  }
+}
+
+async function runCommandLine(input) {
+  const cmd = input.trim();
+  if (!cmd) return;
+
+  state.history.push(cmd);
+  state.historyIndex = state.history.length;
+  termWrite(`\n${promptText()} ${cmd}\n`);
+
+  const lower = cmd.toLowerCase();
+  if (lower === 'clear' || lower === 'cls') {
+    els.termout.textContent = '';
+    return;
+  }
+  if (lower === 'pwd') {
+    termWrite(state.cwd + '\n');
+    return;
+  }
+  if (lower === 'cd') {
+    termWrite(state.cwd + '\n');
+    return;
+  }
+  if (/^cd\s+/i.test(cmd)) {
+    await changeDir(cmd.replace(/^cd\s+/i, '').trim());
+    return;
+  }
+  if (/^(open|cat|edit)\s+/i.test(cmd)) {
+    await openFile(cmd.replace(/^(open|cat|edit)\s+/i, '').trim());
+    return;
+  }
+  if (lower === 'ls' || lower === 'dir') {
+    try {
+      const items = await apiJson(api('/api/ls', { path: state.cwd }));
+      termWrite(items.map((item) => item.name + (item.dir ? '/' : '')).join('  ') + '\n');
+    } catch (err) {
+      termWrite(`erro: ${err.message}\n`);
+    }
+    return;
+  }
+
+  if (state.running) {
+    termWrite('(aguarde o comando atual terminar)\n');
+    return;
+  }
+
+  state.running = true;
+  setStatus('executando…');
+  try {
+    const { id } = await apiJson(api('/api/exec', { cmd }), { method: 'POST' });
+    let done = false;
+    while (!done) {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      const result = await apiJson(api('/api/poll', { id }));
+      if (result.out) termWrite(result.out);
+      done = result.done;
+      if (done && typeof result.code === 'number' && result.code !== 0) {
+        termWrite(`\n[exit ${result.code}]\n`);
+      }
+    }
+    setStatus('pronto');
+  } catch (err) {
+    termWrite(`erro: ${err.message}\n`);
+    setStatus('erro no comando');
+  } finally {
+    state.running = false;
+  }
+}
+
+function bindTerminal() {
+  els.cmdinput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const value = els.cmdinput.value;
+      els.cmdinput.value = '';
+      runCommandLine(value);
+      return;
+    }
+    if (event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!state.history.length) return;
+      state.historyIndex = Math.max(0, state.historyIndex - 1);
+      els.cmdinput.value = state.history[state.historyIndex] || '';
+      return;
+    }
+    if (event.key === 'ArrowDown') {
+      event.preventDefault();
+      state.historyIndex = Math.min(state.history.length, state.historyIndex + 1);
+      els.cmdinput.value = state.history[state.historyIndex] || '';
+    }
+  });
+
+  $('btnclear').addEventListener('click', () => { els.termout.textContent = ''; });
+  $('btnrefresh').addEventListener('click', () => { refreshTree(); });
+  $('btnopenfolder').addEventListener('click', chooseFolder);
+  els.termout.addEventListener('click', () => els.cmdinput.focus());
+
+  window.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+      event.preventDefault();
+      saveActiveFile();
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Boot
+// ---------------------------------------------------------------------------
+(async function init() {
+  bindTerminal();
+  try {
+    await loadMonaco();
+    startEditor();
+    setStatus('editor pronto');
+
+    const info = await apiJson('/api/root');
+    state.root = info.root;
+    state.cwd = info.cwd;
+    els.rootlabel.textContent = state.root;
+    els.rootlabel.title = state.root;
+    updatePrompt();
+    await refreshTree();
+    updateDirty();
+    els.cmdinput.focus();
+  } catch (err) {
+    setStatus('falha na inicialização');
+    els.editorEl.textContent = '';
+    const pre = document.createElement('pre');
+    pre.className = 'error pad';
+    pre.textContent = `Falha ao carregar o editor:\n${err.message}`;
+    els.editorEl.append(pre);
+  }
+})();
+</script>
+</body>
+</html>

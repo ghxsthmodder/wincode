@@ -1,0 +1,55 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows-x64:
+    name: Windows x64 (.exe)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: codebuff-editor
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar Rust (MSVC)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Instalar Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cache do registry do Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-${{ hashFiles('codebuff-editor/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Preparar assets do Monaco
+        run: node scripts/prepare-monaco.js
+
+      - name: Build release (single .exe)
+        run: cargo build --release --target x86_64-pc-windows-msvc --locked
+
+      - name: Upload do executável
+        uses: actions/upload-artifact@v4
+        with:
+          name: codebuff-editor-windows-x64
+          path: codebuff-editor/target/x86_64-pc-windows-msvc/release/codebuff-editor.exe
+          if-no-files-found: error
