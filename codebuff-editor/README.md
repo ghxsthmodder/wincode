@@ -71,6 +71,20 @@ set CODEBUFF_EDITOR_ROOT=C:\projetos\meu-app
 O botão **abrir pasta** na barra superior abre o diálogo nativo do Windows
 (`IFileOpenDialog` via crate `rfd`) e troca a raiz do projeto sem reiniciar o editor.
 
+## Gerenciamento de arquivos e pastas
+
+No **Explorador**, use os botões `+ arquivo` / `+ pasta` no topo do painel ou o
+**clique direito** em qualquer item (ou no espaço vazio, para criar na raiz):
+
+- **novo arquivo** e **nova pasta** — criam dentro da pasta clicada (ou da pasta selecionada)
+- **renomear** — mantém o arquivo aberto no editor, inclusive alterações não salvas
+- **excluir** — pede confirmação e remove pastas com todo o conteúdo (sem lixeira)
+
+Tudo passa pela mesma validação do backend: nomes sem `/ \ : * ? " < > |`,
+proibido sobrescrever item existente e nenhuma operação fora da pasta do projeto.
+Se o terminal estava dentro de uma pasta renomeada/excluída, ele acompanha a mudança
+(ou volta para a raiz).
+
 Atalhos e comandos:
 
 - `Ctrl+S` — salva o arquivo aberto

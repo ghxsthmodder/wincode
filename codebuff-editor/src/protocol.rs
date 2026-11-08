@@ -58,6 +58,9 @@ fn api(
         "ls" => list(param(query, "path"), state),
         "read" => read(param(query, "path"), state),
         "write" => write(param(query, "path"), body, state),
+        "create" => create(param(query, "path"), param(query, "kind"), state),
+        "rename" => rename(param(query, "from"), param(query, "to"), state),
+        "delete" => delete_entry(param(query, "path"), state),
         "cd" => cd(param(query, "path"), state),
         "exec" => exec(param(query, "cmd").unwrap_or_default(), state, jobs),
         "poll" => poll(param(query, "id"), jobs),
@@ -168,6 +171,141 @@ fn write(path_param: Option<String>, body: &[u8], state: &Arc<Mutex<FsState>>) -
         Err(err) => plain(
             StatusCode::BAD_REQUEST,
             &format!("não foi possível salvar: {err}"),
+        ),
+    }
+}
+
+fn create(
+    path_param: Option<String>,
+    kind: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
+    let Some(requested) = path_param else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+
+    let is_dir = kind.as_deref() == Some("dir");
+    let target = {
+        let guard = state.lock().unwrap();
+        match guard.resolve_new(&requested) {
+            Ok(target) => target,
+            Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+        }
+    };
+
+    let result = if is_dir {
+        std::fs::create_dir(&target)
+    } else {
+        // `create_new` evita sobrescrever um arquivo que apareceu nesse meio tempo.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&target)
+            .map(|_| ())
+    };
+
+    match result {
+        Ok(()) => json(serde_json::json!({
+            "path": target.to_string_lossy(),
+            "dir": is_dir,
+        })),
+        Err(err) => plain(
+            StatusCode::BAD_REQUEST,
+            &format!("não foi possível criar: {err}"),
+        ),
+    }
+}
+
+fn rename(
+    from_param: Option<String>,
+    to_param: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
+    let (Some(from), Some(to)) = (from_param, to_param) else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetros from e to são obrigatórios");
+    };
+
+    let mut guard = state.lock().unwrap();
+
+    let root = match guard.canonical_root() {
+        Ok(root) => root,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+    };
+    let source = match guard.resolve(&from) {
+        Ok(source) => source,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+    };
+
+    if source == root {
+        return plain(
+            StatusCode::BAD_REQUEST,
+            "não é possível renomear a pasta do projeto",
+        );
+    }
+    if !source.exists() {
+        return plain(StatusCode::NOT_FOUND, "item não encontrado");
+    }
+
+    let target = match guard.resolve_new(&to) {
+        Ok(target) => target,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+    };
+
+    if let Err(err) = std::fs::rename(&source, &target) {
+        return plain(
+            StatusCode::BAD_REQUEST,
+            &format!("não foi possível renomear: {err}"),
+        );
+    }
+
+    guard.remap_cwd(&source, &target);
+
+    json(serde_json::json!({ "path": target.to_string_lossy() }))
+}
+
+fn delete_entry(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let Some(requested) = path_param else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+
+    let mut guard = state.lock().unwrap();
+
+    let root = match guard.canonical_root() {
+        Ok(root) => root,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+    };
+    let target = match guard.resolve(&requested) {
+        Ok(target) => target,
+        Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+    };
+
+    if target == root {
+        return plain(
+            StatusCode::BAD_REQUEST,
+            "não é possível excluir a pasta do projeto",
+        );
+    }
+    if !target.exists() {
+        return plain(StatusCode::NOT_FOUND, "item não encontrado");
+    }
+
+    let result = if target.is_dir() {
+        std::fs::remove_dir_all(&target)
+    } else {
+        std::fs::remove_file(&target)
+    };
+
+    match result {
+        Ok(()) => {
+            guard.reset_cwd_if_inside(&target);
+            json(serde_json::json!({
+                "ok": true,
+                "path": target.to_string_lossy(),
+            }))
+        }
+        Err(err) => plain(
+            StatusCode::BAD_REQUEST,
+            &format!("não foi possível excluir: {err}"),
         ),
     }
 }

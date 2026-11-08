@@ -49,9 +49,17 @@
     display: flex; flex-direction: column; min-height: 0;
   }
   .panel-title {
-    padding: 8px 12px; font-size: 11px; text-transform: uppercase;
+    display: flex; align-items: center; gap: 6px;
+    padding: 6px 12px; font-size: 11px; text-transform: uppercase;
     letter-spacing: .08em; color: var(--muted); border-bottom: 1px solid var(--border);
   }
+  .panel-title .spacer { flex: 1; }
+  .panel-title button {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 4px; padding: 1px 7px; font: inherit; font-size: 11px;
+    line-height: 15px; text-transform: none; letter-spacing: 0; cursor: pointer;
+  }
+  .panel-title button:hover { background: rgba(255,255,255,.07); color: var(--text); }
   .tree { flex: 1; overflow: auto; padding: 4px 0; }
   .row {
     display: flex; align-items: center; gap: 6px;
@@ -110,6 +118,47 @@
   }
   .statusbar .spacer { flex: 1; }
   .dim { color: var(--muted); }
+
+  .ctxmenu {
+    position: fixed; z-index: 50; min-width: 170px; padding: 4px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 6px; box-shadow: 0 12px 32px rgba(0,0,0,.55);
+  }
+  .ctxmenu button {
+    display: block; width: 100%; text-align: left; padding: 5px 10px;
+    background: transparent; border: none; border-radius: 4px;
+    color: var(--text); font: inherit; cursor: pointer;
+  }
+  .ctxmenu button:hover { background: rgba(137,180,250,.18); }
+  .ctxmenu button.danger { color: var(--danger); }
+  .ctxmenu button.danger:hover { background: rgba(243,139,168,.16); }
+  .ctxmenu .sep { height: 1px; margin: 4px 6px; background: var(--border); }
+
+  .overlay {
+    position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+    background: rgba(5,7,10,.6);
+  }
+  .dialog {
+    width: 360px; max-width: calc(100vw - 32px); padding: 14px;
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; box-shadow: 0 24px 60px rgba(0,0,0,.6);
+  }
+  .dialog h2 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+  .dialog p { margin: 0 0 10px; color: var(--muted); white-space: pre-wrap; word-break: break-word; }
+  .dialog input {
+    width: 100%; padding: 6px 8px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px; outline: none;
+    color: var(--text); font: inherit;
+  }
+  .dialog input:focus { border-color: var(--accent); }
+  .dialog .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .dialog button {
+    padding: 4px 12px; background: transparent; border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font: inherit; cursor: pointer;
+  }
+  .dialog button:hover { background: rgba(255,255,255,.06); }
+  .dialog button.primary { background: rgba(137,180,250,.18); border-color: var(--accent); }
+  .dialog button.danger { background: rgba(243,139,168,.16); border-color: var(--danger); color: var(--danger); }
   .pad { padding: 8px 12px; }
   .error { color: var(--danger); white-space: pre-wrap; }
 </style>
@@ -125,7 +174,12 @@
 
     <div class="panels">
       <aside class="sidebar">
-        <div class="panel-title">Explorador</div>
+        <div class="panel-title">
+          <span>Explorador</span>
+          <span class="spacer"></span>
+          <button id="btnnewfile" type="button" title="Novo arquivo na pasta selecionada">+ arquivo</button>
+          <button id="btnnewfolder" type="button" title="Nova pasta na pasta selecionada">+ pasta</button>
+        </div>
         <div id="tree" class="tree"><div class="dim pad">carregando…</div></div>
       </aside>
 
@@ -176,7 +230,7 @@ const els = {
   statuspos: $('statuspos'),
 };
 
-const state = { root: '', cwd: '', running: false, history: [], historyIndex: 0 };
+const state = { root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false, history: [], historyIndex: 0 };
 const models = new Map();
 let view = null;
 let activePath = null;
@@ -315,6 +369,7 @@ async function openFile(requestedPath) {
     view.setModel(entry.model);
     view.focus();
     els.statusfile.textContent = path;
+    state.selectedDir = parentOf(path);
     highlightActiveRow();
     updateDirty();
     setStatus(`aberto ${baseName(path)}`);
@@ -339,6 +394,284 @@ async function saveActiveFile() {
   } catch (err) {
     setStatus('erro ao salvar: ' + err.message);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Gerenciamento de arquivos e pastas
+// ---------------------------------------------------------------------------
+const trimSlash = (path) => String(path || '').replace(/[\\/]+$/, '');
+const joinPath = (dir, name) => `${trimSlash(dir)}/${name}`;
+const parentOf = (path) => {
+  const clean = trimSlash(String(path || '').replace(/\\/g, '/'));
+  const index = clean.lastIndexOf('/');
+  return index > 0 ? clean.slice(0, index) : state.root;
+};
+const normalizePath = (path) => trimSlash(String(path || '').replace(/\\/g, '/')).toLowerCase();
+const sameOrInside = (path, base) => {
+  const target = normalizePath(path);
+  const parent = normalizePath(base);
+  return target === parent || target.startsWith(parent + '/');
+};
+
+function closeMenu() {
+  document.querySelectorAll('.ctxmenu').forEach((node) => node.remove());
+}
+
+function showMenu(x, y, entries) {
+  closeMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ctxmenu';
+
+  for (const entry of entries) {
+    if (entry === '-') {
+      const separator = document.createElement('div');
+      separator.className = 'sep';
+      menu.append(separator);
+      continue;
+    }
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = entry.label;
+    if (entry.danger) button.classList.add('danger');
+    button.addEventListener('click', () => {
+      closeMenu();
+      entry.run();
+    });
+    menu.append(button);
+  }
+
+  menu.style.left = `${x}px`;
+  menu.style.top = `${y}px`;
+  document.body.append(menu);
+
+  const rect = menu.getBoundingClientRect();
+  if (rect.right > window.innerWidth - 6) menu.style.left = `${Math.max(6, window.innerWidth - rect.width - 6)}px`;
+  if (rect.bottom > window.innerHeight - 6) menu.style.top = `${Math.max(6, window.innerHeight - rect.height - 6)}px`;
+}
+
+/** Diálogo próprio: `prompt()`/`confirm()` não são confiáveis no WebView2. */
+function showDialog({ title, message = '', value, confirmLabel = 'ok', danger = false }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    overlay.className = 'overlay';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'dialog';
+
+    const heading = document.createElement('h2');
+    heading.textContent = title;
+    dialog.append(heading);
+
+    if (message) {
+      const text = document.createElement('p');
+      text.textContent = message;
+      dialog.append(text);
+    }
+
+    let input = null;
+    if (value !== undefined) {
+      input = document.createElement('input');
+      input.type = 'text';
+      input.spellcheck = false;
+      input.autocomplete = 'off';
+      input.value = value;
+      dialog.append(input);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'actions';
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = 'cancelar';
+    const confirmButton = document.createElement('button');
+    confirmButton.type = 'button';
+    confirmButton.textContent = confirmLabel;
+    confirmButton.className = danger ? 'danger' : 'primary';
+    actions.append(cancel, confirmButton);
+    dialog.append(actions);
+    overlay.append(dialog);
+    document.body.append(overlay);
+
+    const finish = (result) => {
+      overlay.remove();
+      document.removeEventListener('keydown', onKey, true);
+      resolve(result);
+    };
+    const submit = () => {
+      if (!input) return finish(true);
+      const name = input.value.trim();
+      if (!name) {
+        input.focus();
+        return;
+      }
+      finish(name);
+    };
+    function onKey(event) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        finish(null);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        submit();
+      }
+    }
+
+    cancel.addEventListener('click', () => finish(null));
+    confirmButton.addEventListener('click', submit);
+    overlay.addEventListener('pointerdown', (event) => {
+      if (event.target === overlay) finish(null);
+    });
+    document.addEventListener('keydown', onKey, true);
+
+    if (input) {
+      input.focus();
+      input.select();
+    } else {
+      confirmButton.focus();
+    }
+  });
+}
+
+const validName = (name) => !!name && name !== '.' && name !== '..' && !/[\\/:*?"<>|]/.test(name);
+
+async function syncWorkspaceInfo() {
+  const info = await apiJson('/api/root');
+  state.root = info.root;
+  state.cwd = info.cwd || info.root;
+  els.rootlabel.textContent = state.root;
+  els.rootlabel.title = state.root;
+  updatePrompt();
+}
+
+async function createEntry(dir, kind) {
+  const isDir = kind === 'dir';
+  const targetDir = dir || state.selectedDir || state.root;
+  const name = await showDialog({
+    title: isDir ? 'Nova pasta' : 'Novo arquivo',
+    message: targetDir,
+    value: '',
+    confirmLabel: 'criar',
+  });
+  if (!name) return;
+  if (!validName(name)) {
+    setStatus('nome inválido: não use \\ / : * ? " < > |');
+    return;
+  }
+
+  try {
+    const created = await apiJson(
+      api('/api/create', { path: joinPath(targetDir, name), kind: isDir ? 'dir' : 'file' }),
+      { method: 'POST' },
+    );
+    state.expanded.add(targetDir);
+    await refreshTree();
+    setStatus(`${isDir ? 'pasta criada' : 'arquivo criado'}: ${baseName(created.path)}`);
+    if (!isDir) await openFile(created.path);
+  } catch (err) {
+    setStatus('erro ao criar: ' + err.message);
+  }
+}
+
+async function renameEntry(item) {
+  const name = await showDialog({
+    title: `Renomear ${item.dir ? 'pasta' : 'arquivo'}`,
+    message: item.path,
+    value: item.name,
+    confirmLabel: 'renomear',
+  });
+  if (!name || name === item.name) return;
+  if (!validName(name)) {
+    setStatus('nome inválido: não use \\ / : * ? " < > |');
+    return;
+  }
+
+  try {
+    const result = await apiJson(
+      api('/api/rename', { from: item.path, to: joinPath(parentOf(item.path), name) }),
+      { method: 'POST' },
+    );
+    migrateModels(item.path, result.path);
+    remapExpanded(item.path, result.path);
+    state.expanded.add(parentOf(result.path));
+    await refreshTree();
+    await syncWorkspaceInfo();
+    setStatus(`renomeado: ${item.name} → ${baseName(result.path)}`);
+  } catch (err) {
+    setStatus('erro ao renomear: ' + err.message);
+  }
+}
+
+async function deleteEntry(item) {
+  const ok = await showDialog({
+    title: `Excluir ${item.dir ? 'pasta' : 'arquivo'}`,
+    message: item.dir
+      ? `${item.path}\n\nA pasta e todo o seu conteúdo serão removidos. Esta ação não pode ser desfeita.`
+      : `${item.path}\n\nEsta ação não pode ser desfeita.`,
+    confirmLabel: 'excluir',
+    danger: true,
+  });
+  if (!ok) return;
+
+  try {
+    await apiJson(api('/api/delete', { path: item.path }), { method: 'POST' });
+    dropModelsUnder(item.path);
+    await refreshTree();
+    await syncWorkspaceInfo();
+    setStatus(`excluído: ${item.name}`);
+  } catch (err) {
+    setStatus('erro ao excluir: ' + err.message);
+  }
+}
+
+/** Pastas expandidas acompanham a renomeação. */
+function remapExpanded(from, to) {
+  const next = new Set();
+  for (const path of state.expanded) {
+    next.add(sameOrInside(path, from) ? to + path.slice(from.length) : path);
+  }
+  state.expanded.clear();
+  for (const path of next) state.expanded.add(path);
+}
+
+/** Renomeação de arquivo/pasta mantém os modelos abertos e o estado "sujo". */
+function migrateModels(from, to) {
+  for (const [path, entry] of Array.from(models)) {
+    if (!sameOrInside(path, from) || normalizePath(path) === normalizePath(to)) continue;
+    const nextPath = to + path.slice(from.length);
+    const model = window.monaco.editor.createModel(
+      entry.model.getValue(),
+      languageFor(nextPath),
+      window.monaco.Uri.file(nextPath.replace(/\\/g, '/')),
+    );
+    const wasActive = activePath === path;
+    models.delete(path);
+    models.set(nextPath, { model, saved: entry.saved });
+    if (wasActive) {
+      activePath = nextPath;
+      view.setModel(model);
+      els.statusfile.textContent = nextPath;
+    }
+    entry.model.dispose();
+  }
+  updateDirty();
+}
+
+/** Fecha modelos que ficaram sob um item excluído. */
+function dropModelsUnder(target) {
+  for (const [path, entry] of Array.from(models)) {
+    if (!sameOrInside(path, target)) continue;
+    const wasActive = activePath === path;
+    models.delete(path);
+    if (wasActive) {
+      activePath = null;
+      if (view) view.setModel(window.monaco.editor.createModel('', 'plaintext'));
+      els.statusfile.textContent = '';
+      els.tab.hidden = true;
+    }
+    entry.model.dispose();
+  }
+  updateDirty();
 }
 
 // ---------------------------------------------------------------------------
@@ -373,52 +706,88 @@ function makeNode(item, depth) {
   row.append(caret, icon, name);
   group.append(row);
 
-  if (item.dir) {
-    const children = document.createElement('div');
-    children.hidden = true;
-    group.append(children);
-    let loaded = false;
+  const children = document.createElement('div');
+  children.hidden = true;
+  let loaded = false;
+  let open = false;
 
-    row.addEventListener('click', async () => {
-      const willOpen = children.hidden;
-      children.hidden = !willOpen;
-      row.classList.toggle('open', willOpen);
-      caret.textContent = willOpen ? '▾' : '▸';
-      if (!willOpen || loaded) return;
+  const loadChildren = async () => {
+    const loading = document.createElement('div');
+    loading.className = 'dim pad';
+    loading.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
+    loading.textContent = 'carregando…';
+    children.append(loading);
 
-      loaded = true;
-      const loading = document.createElement('div');
-      loading.className = 'dim pad';
-      loading.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
-      loading.textContent = 'carregando…';
-      children.append(loading);
-
-      try {
-        const items = await apiJson(api('/api/ls', { path: item.path }));
-        children.innerHTML = '';
-        if (!items.length) {
-          const empty = document.createElement('div');
-          empty.className = 'dim pad';
-          empty.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
-          empty.textContent = '(vazia)';
-          children.append(empty);
-        } else {
-          items.forEach((child) => children.append(makeNode(child, depth + 1)));
-        }
-      } catch (err) {
-        children.innerHTML = '';
-        const failed = document.createElement('div');
-        failed.className = 'error pad';
-        failed.textContent = err.message;
-        children.append(failed);
-        loaded = false;
+    try {
+      const items = await apiJson(api('/api/ls', { path: item.path }));
+      children.innerHTML = '';
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'dim pad';
+        empty.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
+        empty.textContent = '(vazia)';
+        children.append(empty);
+      } else {
+        items.forEach((child) => children.append(makeNode(child, depth + 1)));
       }
-    });
+    } catch (err) {
+      children.innerHTML = '';
+      const failed = document.createElement('div');
+      failed.className = 'error pad';
+      failed.textContent = err.message;
+      children.append(failed);
+      loaded = false;
+    }
+  };
+
+  const setOpen = async (next) => {
+    open = next;
+    children.hidden = !next;
+    row.classList.toggle('open', next);
+    caret.textContent = next ? '▾' : '▸';
+    if (!next) {
+      state.expanded.delete(item.path);
+      return;
+    }
+    state.expanded.add(item.path);
+    if (loaded) return;
+    loaded = true;
+    await loadChildren();
+  };
+
+  if (item.dir) {
+    group.append(children);
+    row.addEventListener('click', () => { setOpen(!open); });
   } else {
     row.addEventListener('click', () => openFile(item.path));
   }
 
+  row.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const dir = item.dir ? item.path : parentOf(item.path);
+    state.selectedDir = dir;
+    showMenu(event.clientX, event.clientY, [
+      { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
+      { label: 'nova pasta', run: () => createEntry(dir, 'dir') },
+      '-',
+      { label: 'renomear', run: () => renameEntry(item) },
+      { label: 'excluir', danger: true, run: () => deleteEntry(item) },
+    ]);
+  });
+
+  group.editorNode = { item, children, setOpen };
   return group;
+}
+
+/** Reabre as pastas que estavam expandidas antes de uma atualização. */
+async function restoreExpanded(group) {
+  const node = group.editorNode;
+  if (!node || !node.item.dir || !state.expanded.has(node.item.path)) return;
+  await node.setOpen(true);
+  for (const child of Array.from(node.children.children)) {
+    if (child.editorNode) await restoreExpanded(child);
+  }
 }
 
 async function refreshTree() {
@@ -431,7 +800,9 @@ async function refreshTree() {
       empty.textContent = 'pasta vazia';
       els.tree.append(empty);
     } else {
-      items.forEach((item) => els.tree.append(makeNode(item, 0)));
+      const groups = items.map((item) => makeNode(item, 0));
+      els.tree.append(...groups);
+      for (const group of groups) await restoreExpanded(group);
     }
     highlightActiveRow();
   } catch (err) {
@@ -448,6 +819,8 @@ function resetWorkspace(info) {
   els.rootlabel.textContent = state.root;
   els.rootlabel.title = state.root;
   updatePrompt();
+  state.selectedDir = state.root;
+  state.expanded.clear();
 
   const previous = Array.from(models.values());
   models.clear();
@@ -600,9 +973,30 @@ function bindTerminal() {
   $('btnclear').addEventListener('click', () => { els.termout.textContent = ''; });
   $('btnrefresh').addEventListener('click', () => { refreshTree(); });
   $('btnopenfolder').addEventListener('click', chooseFolder);
+
+  $('btnnewfile').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'file'));
+  $('btnnewfolder').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'dir'));
+
+  // Clique direito no espaço vazio da árvore cria na pasta selecionada.
+  els.tree.addEventListener('contextmenu', (event) => {
+    if (event.target.closest('.row')) return;
+    event.preventDefault();
+    const dir = state.selectedDir || state.root;
+    showMenu(event.clientX, event.clientY, [
+      { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
+      { label: 'nova pasta', run: () => createEntry(dir, 'dir') },
+    ]);
+  });
+
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest('.ctxmenu')) closeMenu();
+  });
+  window.addEventListener('blur', closeMenu);
+  window.addEventListener('resize', closeMenu);
   els.termout.addEventListener('click', () => els.cmdinput.focus());
 
   window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') closeMenu();
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       saveActiveFile();
@@ -623,6 +1017,7 @@ function bindTerminal() {
     const info = await apiJson('/api/root');
     state.root = info.root;
     state.cwd = info.cwd;
+    state.selectedDir = state.root;
     els.rootlabel.textContent = state.root;
     els.rootlabel.title = state.root;
     updatePrompt();
