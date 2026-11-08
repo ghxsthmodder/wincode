@@ -1906,6 +1906,68 @@ function titleGlyph(iconId) {
   return TITLE_GLYPH[iconId] || '📄';
 }
 
+function emptyRow(label, depth) {
+  const el = document.createElement('div');
+  el.className = 'dim pad';
+  if (depth > 0) el.style.paddingLeft = `${8 + depth * 12}px`;
+  el.textContent = label;
+  return el;
+}
+
+/**
+ * Aplica uma listagem em um contêiner reaproveitando as linhas que continuam
+ * existindo. Pastas mantêm o que já estava carregado embaixo delas, então uma
+ * atualização custa só a listagem daquela pasta — nada de refazer a árvore.
+ */
+function fillChildren(container, items, depth, emptyLabel) {
+  const reuse = new Map();
+  for (const node of Array.from(container.children)) {
+    if (node.editorNode) reuse.set(node.editorNode.item.path, node);
+    else node.remove();
+  }
+
+  if (!items.length) {
+    for (const node of reuse.values()) node.remove();
+    container.append(emptyRow(emptyLabel, depth));
+    return;
+  }
+
+  for (const item of items) {
+    const previous = reuse.get(item.path);
+    reuse.delete(item.path);
+    const node = previous && previous.editorNode.item.dir === item.dir
+      ? previous
+      : makeNode(item, depth);
+    container.append(node);
+  }
+
+  // O que sobrou em `reuse` foi removido/renomeado no disco.
+  for (const stale of reuse.values()) stale.remove();
+}
+
+/** Descendentes de uma pasta recolhida não são visíveis nem precisam ser conferidos. */
+function pruneExpanded(path) {
+  const base = String(path).replace(/\\/g, '/').replace(/\/+$/, '');
+  for (const expanded of Array.from(state.expanded)) {
+    if (String(expanded).replace(/\\/g, '/').startsWith(base + '/')) {
+      state.expanded.delete(expanded);
+    }
+  }
+}
+
+function findDirNode(container, path) {
+  for (const node of container.children) {
+    const info = node.editorNode;
+    if (!info || !info.item.dir) continue;
+    if (info.item.path === path) return node;
+    if (!info.children.hidden) {
+      const found = findDirNode(info.children, path);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function makeNode(item, depth) {
   const group = document.createElement('div');
   const row = document.createElement('div');
@@ -1942,30 +2004,17 @@ function makeNode(item, depth) {
   let open = false;
 
   const loadChildren = async () => {
-    const loading = document.createElement('div');
-    loading.className = 'dim pad';
-    loading.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
-    loading.textContent = 'carregando…';
-    children.append(loading);
+    if (!children.querySelector('.row')) {
+      const loading = emptyRow('carregando…', depth + 1);
+      children.replaceChildren(loading);
+    }
 
     try {
       const items = await apiJson(api('/api/ls', { path: item.path }));
-      children.innerHTML = '';
-      if (!items.length) {
-        const empty = document.createElement('div');
-        empty.className = 'dim pad';
-        empty.style.paddingLeft = `${8 + (depth + 1) * 12}px`;
-        empty.textContent = '(vazia)';
-        children.append(empty);
-      } else {
-        items.forEach((child) => children.append(makeNode(child, depth + 1)));
-      }
+      fillChildren(children, items, depth + 1, '(vazia)');
     } catch (err) {
-      children.innerHTML = '';
-      const failed = document.createElement('div');
-      failed.className = 'error pad';
-      failed.textContent = err.message;
-      children.append(failed);
+      children.replaceChildren(emptyRow(err.message, depth + 1));
+      children.firstElementChild.className = 'error pad';
       loaded = false;
     }
   };
@@ -1977,6 +2026,9 @@ function makeNode(item, depth) {
     caret.textContent = next ? '▾' : '▸';
     if (!next) {
       state.expanded.delete(item.path);
+      pruneExpanded(item.path);
+      // Ao reabrir, relê só esta pasta: o que mudou enquanto estava fechada aparece.
+      loaded = false;
       return;
     }
     state.expanded.add(item.path);
@@ -2006,7 +2058,7 @@ function makeNode(item, depth) {
     ]);
   });
 
-  group.editorNode = { item, children, setOpen };
+  group.editorNode = { item, children, setOpen, depth };
   return group;
 }
 
@@ -2024,22 +2076,34 @@ async function refreshTree() {
   els.tree.innerHTML = '';
   try {
     const items = await apiJson(api('/api/ls', { path: state.root }));
-    if (!items.length) {
-      const empty = document.createElement('div');
-      empty.className = 'dim pad';
-      empty.textContent = 'pasta vazia';
-      els.tree.append(empty);
-    } else {
-      const groups = items.map((item) => makeNode(item, 0));
-      els.tree.append(...groups);
-      for (const group of groups) await restoreExpanded(group);
-    }
+    fillChildren(els.tree, items, 0, 'pasta vazia');
+    for (const group of Array.from(els.tree.children)) await restoreExpanded(group);
     highlightActiveRow();
   } catch (err) {
-    const failed = document.createElement('div');
+    const failed = emptyRow('erro ao listar: ' + err.message, 0);
     failed.className = 'error pad';
-    failed.textContent = 'erro ao listar: ' + err.message;
-    els.tree.append(failed);
+    els.tree.replaceChildren(failed);
+  }
+}
+
+/**
+ * Atualiza uma única pasta visível, sem tocar no resto da árvore. É usada pelo
+ * recarregamento automático: só o que mudou (e está na tela) é relido.
+ */
+async function refreshDir(path) {
+  try {
+    const items = await apiJson(api('/api/ls', { path }));
+    if (path === state.root) {
+      fillChildren(els.tree, items, 0, 'pasta vazia');
+    } else {
+      const group = findDirNode(els.tree, path);
+      if (!group) return; // pasta fora da parte visível: não há o que atualizar
+      const info = group.editorNode;
+      fillChildren(info.children, items, info.depth + 1, '(vazia)');
+    }
+    highlightActiveRow();
+  } catch {
+    // Pasta removida: a listagem do pai é atualizada na mesma rodada.
   }
 }
 
@@ -2097,16 +2161,19 @@ async function watchTick() {
       body: JSON.stringify(paths),
     });
 
-    let treeChanged = false;
+    const changedDirs = [];
     for (const [path, signature] of Object.entries(next)) {
       const previous = watchSignatures.get(path);
       if (previous === undefined || previous === signature) continue;
-      if (path === state.root || state.expanded.has(path)) treeChanged = true;
+      if (path === state.root || state.expanded.has(path)) changedDirs.push(path);
       else if (models.has(path)) await reloadFileFromDisk(path);
     }
 
     watchSignatures = new Map(Object.entries(next));
-    if (treeChanged) await refreshTree();
+
+    // Mais fundo primeiro: se uma pasta sumiu, o pai ainda a remove na sequência.
+    changedDirs.sort((a, b) => b.length - a.length);
+    for (const dir of changedDirs) await refreshDir(dir);
   } catch {
     // A checagem é silenciosa: uma falha isolada não deve poluir a barra de status.
   } finally {

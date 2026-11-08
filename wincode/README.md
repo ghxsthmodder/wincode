@@ -101,10 +101,12 @@ Largura, altura e visibilidade ficam salvas no JSON de configurações.
 
 ## Recarregamento automático
 
-A cada ~2 segundos o editor confere a pasta raiz, as pastas expandidas e os arquivos
-abertos. Quando um arquivo ou pasta é criado, renomeado ou removido fora do editor, a
-árvore se atualiza sozinha; arquivos abertos **sem alterações pendentes** são relidos do
-disco. Abas com edições não salvas nunca são sobrescritas — salve ou descarte antes.
+A cada ~2 segundos o editor confere **apenas o que está visível**: a pasta raiz, as
+pastas expandidas e os arquivos abertos (pastas dentro de uma pasta recolhida saem da
+checagem). Quando algo muda, só a pasta afetada é relida e suas linhas são atualizadas
+no lugar — o resto da árvore, a rolagem e o que já estava carregado não são tocados.
+Arquivos abertos **sem alterações pendentes** são relidos do disco; abas com edições não
+salvas nunca são sobrescritas — salve ou descarte antes.
 
 ## Abas
 
