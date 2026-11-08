@@ -36,6 +36,7 @@ wincode/
     assets.rs               # assets embutidos (override opcional em disco)
     fsapi.rs                # raiz do projeto + resolução segura de caminhos
     jobs.rs                 # execução assíncrona dos comandos do terminal
+    settings.rs             # preferências do editor (JSON no config do usuário)
 ```
 
 ## Preparar o Monaco
@@ -92,9 +93,35 @@ proibido sobrescrever item existente e nenhuma operação fora da pasta do proje
 Se o terminal estava dentro de uma pasta renomeada/excluída, ele acompanha a mudança
 (ou volta para a raiz).
 
+## Configurações
+
+O botão **⚙ configurações** (ou `Ctrl+,`) abre o painel de preferências, aplicado
+ao vivo e salvo automaticamente:
+
+- **Editor (Monaco)**: tema (`vs-dark`, `vs`, alto contraste), família e tamanho da fonte,
+altura da linha, indentação (espaços ou tabulação + largura), detecção da indentação
+do arquivo, quebra de linha, números de linha, espaços em branco visíveis, estilo do
+cursor, minimapa, rolagem suave e **salvar automaticamente** (~1s após parar de digitar)
+- **Interface**: tema claro/escuro (independente do tema do editor), tamanho da fonte da
+interface, largura do explorador e exibição dos ícones da árvore
+- **Terminal**: tamanho da fonte
+- **restaurar padrões** devolve tudo ao inicial
+
+A indentação vale também para os arquivos já abertos, e o tema do Monaco é trocado sem
+reabrir o editor. As preferências ficam em um JSON fora do projeto, no diretório de
+configuração do usuário:
+
+```
+%APPDATA%\Wincode\settings.json
+```
+
+Valores fora da faixa ou desconhecidos são ignorados na leitura, então editar o arquivo
+à mão não quebra a interface.
+
 ## Atalhos e comandos
 
 - `Ctrl+S` — salva o arquivo aberto
+- `Ctrl+,` — abre/fecha as configurações (`Esc` também fecha)
 - `Ctrl+Shift+P` — não implementado ainda
 - Terminal: qualquer comando (`dir`, `git status`, `cargo build`…) executa via `cmd.exe /C`
   no diretório atual do terminal, com saída em streaming. O processo é criado com

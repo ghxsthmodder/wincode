@@ -6,6 +6,7 @@ mod dialog;
 mod fsapi;
 mod jobs;
 mod protocol;
+mod settings;
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -70,6 +71,7 @@ fn run() -> Result<(), String> {
     let assets = Arc::new(assets::Assets::new());
     let state = Arc::new(Mutex::new(fsapi::FsState::new(root)));
     let jobs = Arc::new(jobs::Jobs::new());
+    let settings = Arc::new(settings::Settings::new());
 
     let _webview = WebViewBuilder::new(window)
         .map_err(|err| format!("não foi possível inicializar o WebView: {err}"))?
@@ -77,7 +79,8 @@ fn run() -> Result<(), String> {
             let assets = assets.clone();
             let state = state.clone();
             let jobs = jobs.clone();
-            move |request| protocol::serve(&assets, &state, &jobs, request)
+            let settings = settings.clone();
+            move |request| protocol::serve(&assets, &state, &jobs, &settings, request)
         })
         .with_url("editor://localhost/index.html")
         .map_err(|err| format!("URL inicial inválida: {err}"))?

@@ -15,14 +15,35 @@
     --accent: #89b4fa;
     --accent2: #f5c2e7;
     --danger: #f38ba8;
+    --ui-font-size: 13px;
+    --sidebar-width: 250px;
+    --term-font-size: 12.5px;
   }
+
+  /* Tema claro da interface (o tema do Monaco é escolhido à parte). */
+  body.light {
+    --bg: #eef1f7;
+    --panel: #f7f9fc;
+    --surface: #ffffff;
+    --border: #d3d9e4;
+    --text: #1d2330;
+    --muted: #667085;
+    --accent: #2563eb;
+    --accent2: #9333ea;
+    --danger: #dc2626;
+  }
+  body.light .row:hover,
+  body.light .titlebar button:hover,
+  body.light .panel-title button:hover,
+  body.light .dialog button:hover { background: rgba(15,23,42,.06); }
+  body.light .overlay { background: rgba(15,23,42,.35); }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
   body {
     background: var(--bg);
     color: var(--text);
     font-family: ui-sans-serif, "Segoe UI", system-ui, sans-serif;
-    font-size: 13px;
+    font-size: var(--ui-font-size);
     overflow: hidden;
   }
   .app { display: grid; grid-template-rows: 34px 1fr 24px; height: 100vh; }
@@ -42,7 +63,7 @@
   }
   .titlebar button:hover { background: rgba(255,255,255,.06); }
 
-  .panels { display: grid; grid-template-columns: 250px 1fr; min-height: 0; }
+  .panels { display: grid; grid-template-columns: var(--sidebar-width) 1fr; min-height: 0; }
   .sidebar {
     background: var(--panel);
     border-right: 1px solid var(--border);
@@ -103,14 +124,15 @@
   .termout {
     flex: 1; overflow: auto; padding: 8px 12px; margin: 0;
     font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-size: 12.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word;
+    font-size: var(--term-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-word;
     color: var(--text);
   }
   .inputline { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
   .prompt { color: var(--accent); font-family: ui-monospace, monospace; }
   #cmdinput {
     flex: 1; background: transparent; border: none; outline: none;
-    color: var(--text); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace; font-size: 12.5px;
+    color: var(--text); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: var(--term-font-size);
   }
 
   .statusbar {
@@ -140,6 +162,7 @@
     position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
     background: rgba(5,7,10,.6);
   }
+  .overlay[hidden] { display: none; }
   .dialog {
     width: 360px; max-width: calc(100vw - 32px); padding: 14px;
     background: var(--panel); border: 1px solid var(--border);
@@ -161,6 +184,31 @@
   .dialog button:hover { background: rgba(255,255,255,.06); }
   .dialog button.primary { background: rgba(137,180,250,.18); border-color: var(--accent); }
   .dialog button.danger { background: rgba(243,139,168,.16); border-color: var(--danger); color: var(--danger); }
+  .tree.no-icons .fticon { display: none; }
+
+  .settings {
+    width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 64px);
+    display: flex; flex-direction: column;
+  }
+  .settings .body { overflow: auto; padding-right: 6px; }
+  .settings .actions .spacer { flex: 1; }
+  .settings h3 {
+    margin: 14px 0 2px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted);
+  }
+  .settings h3:first-child { margin-top: 4px; }
+  .setting {
+    display: flex; align-items: center; gap: 12px; padding: 4px 0;
+  }
+  .setting .label { flex: 1; display: block; }
+  .setting .label small { display: block; color: var(--muted); font-size: 11px; }
+  .setting select, .setting input[type=number], .setting input[type=text] {
+    width: 210px; padding: 4px 8px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font: inherit;
+  }
+  .setting select:focus, .setting input:focus { outline: none; border-color: var(--accent); }
+  .setting input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
   .pad { padding: 8px 12px; }
   .error { color: var(--danger); white-space: pre-wrap; }
 </style>
@@ -172,6 +220,7 @@
       <span id="rootlabel" class="rootlabel">carregando…</span>
       <button id="btnopenfolder" title="Abrir outra pasta">abrir pasta</button>
       <button id="btnrefresh" title="Recarregar a árvore de arquivos">recarregar</button>
+      <button id="btnsettings" title="Configurações (Ctrl+,)">⚙ configurações</button>
     </header>
 
     <div class="panels">
@@ -218,6 +267,155 @@
     </footer>
   </div>
 
+  <div id="settings" class="overlay" hidden>
+    <div class="dialog settings">
+      <h2>Configurações</h2>
+      <div class="body">
+        <h3>Editor (Monaco)</h3>
+
+        <label class="setting">
+          <span class="label">tema</span>
+          <select id="set-theme">
+            <option value="vs-dark">escuro (vs-dark)</option>
+            <option value="vs">claro (vs)</option>
+            <option value="hc-black">alto contraste escuro</option>
+            <option value="hc-light">alto contraste claro</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">fonte<small>família; a primeira disponível é usada</small></span>
+          <input id="set-fontfamily" type="text" list="fontoptions" spellcheck="false">
+        </label>
+        <datalist id="fontoptions">
+          <option value="&quot;Cascadia Code&quot;, &quot;JetBrains Mono&quot;, Consolas, monospace"></option>
+          <option value="&quot;Fira Code&quot;, Consolas, monospace"></option>
+          <option value="&quot;JetBrains Mono&quot;, monospace"></option>
+          <option value="Consolas, &quot;Courier New&quot;, monospace"></option>
+          <option value="ui-monospace, monospace"></option>
+        </datalist>
+
+        <label class="setting">
+          <span class="label">tamanho da fonte</span>
+          <input id="set-fontsize" type="number" min="8" max="32" step="1">
+        </label>
+
+        <label class="setting">
+          <span class="label">altura da linha<small>0 = automática</small></span>
+          <input id="set-lineheight" type="number" min="0" max="60" step="1">
+        </label>
+
+        <label class="setting">
+          <span class="label">indentação</span>
+          <select id="set-tabmode">
+            <option value="space">espaços</option>
+            <option value="tab">tabulação</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">largura da indentação<small>colunas por nível</small></span>
+          <input id="set-tabsize" type="number" min="1" max="8" step="1">
+        </label>
+
+        <label class="setting">
+          <span class="label">detectar indentação do arquivo<small>ao abrir, segue o que o arquivo já usa</small></span>
+          <input id="set-detectindent" type="checkbox">
+        </label>
+
+        <label class="setting">
+          <span class="label">quebra de linha</span>
+          <select id="set-wordwrap">
+            <option value="off">desligada</option>
+            <option value="on">ligada</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">números de linha</span>
+          <select id="set-linenumbers">
+            <option value="on">mostrar</option>
+            <option value="off">ocultar</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">espaços em branco</span>
+          <select id="set-whitespace">
+            <option value="none">não mostrar</option>
+            <option value="selection">só na seleção</option>
+            <option value="trailing">só à direita</option>
+            <option value="all">sempre</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">cursor</span>
+          <select id="set-cursor">
+            <option value="smooth">suave</option>
+            <option value="blink">piscando</option>
+            <option value="phase">em fase</option>
+            <option value="solid">fixo</option>
+            <option value="expand">expansão</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">minimapa</span>
+          <input id="set-minimap" type="checkbox">
+        </label>
+
+        <label class="setting">
+          <span class="label">rolagem suave</span>
+          <input id="set-smooth" type="checkbox">
+        </label>
+
+        <label class="setting">
+          <span class="label">salvar automaticamente<small>grava cerca de 1s após parar de digitar</small></span>
+          <input id="set-autosave" type="checkbox">
+        </label>
+
+        <h3>Interface</h3>
+
+        <label class="setting">
+          <span class="label">tema da interface<small>independente do tema do editor</small></span>
+          <select id="set-apptheme">
+            <option value="dark">escuro</option>
+            <option value="light">claro</option>
+          </select>
+        </label>
+
+        <label class="setting">
+          <span class="label">tamanho da fonte da interface</span>
+          <input id="set-uifont" type="number" min="10" max="18" step="1">
+        </label>
+
+        <label class="setting">
+          <span class="label">largura do explorador<small>em pixels</small></span>
+          <input id="set-sidebar" type="number" min="180" max="520" step="10">
+        </label>
+
+        <label class="setting">
+          <span class="label">ícones na árvore</span>
+          <input id="set-treeicons" type="checkbox">
+        </label>
+
+        <h3>Terminal</h3>
+
+        <label class="setting">
+          <span class="label">tamanho da fonte</span>
+          <input id="set-termfont" type="number" min="9" max="20" step="0.5">
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="setreset" type="button">restaurar padrões</button>
+        <span class="spacer"></span>
+        <button id="setclose" type="button" class="primary">fechar</button>
+      </div>
+    </div>
+  </div>
+
 <script type="module">
 const $ = (id) => document.getElementById(id);
 
@@ -225,6 +423,7 @@ const els = {
   tree: $('tree'),
   editorEl: $('editor'),
   tab: $('tab'),
+  settings: $('settings'),
   tabicon: $('tabicon'),
   tabname: $('tabname'),
   termout: $('termout'),
@@ -314,27 +513,269 @@ const resolvePath = (path) => {
   return `${base}/${value.replace(/^\.\//, '')}`;
 };
 
+// ---------------------------------------------------------------------------
+// Configurações (editor Monaco + interface + terminal)
+// ---------------------------------------------------------------------------
+const SETTINGS_DEFAULTS = {
+  theme: 'vs-dark',
+  fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+  fontSize: 13,
+  lineHeight: 0,
+  tabMode: 'space',
+  tabSize: 2,
+  detectIndentation: true,
+  wordWrap: 'off',
+  lineNumbers: 'on',
+  renderWhitespace: 'selection',
+  cursorBlinking: 'smooth',
+  minimap: false,
+  smoothScrolling: false,
+  autoSave: false,
+  appTheme: 'dark',
+  uiFontSize: 13,
+  sidebarWidth: 250,
+  treeIcons: true,
+  terminalFontSize: 12.5,
+};
+
+const SETTING_RANGES = {
+  fontSize: [8, 32],
+  lineHeight: [0, 60],
+  tabSize: [1, 8],
+  uiFontSize: [10, 18],
+  sidebarWidth: [180, 520],
+  terminalFontSize: [9, 20],
+};
+
+const SETTING_ENUMS = {
+  theme: ['vs-dark', 'vs', 'hc-black', 'hc-light'],
+  tabMode: ['space', 'tab'],
+  wordWrap: ['off', 'on'],
+  lineNumbers: ['on', 'off'],
+  renderWhitespace: ['none', 'selection', 'trailing', 'all'],
+  cursorBlinking: ['blink', 'smooth', 'phase', 'solid', 'expand'],
+  appTheme: ['dark', 'light'],
+};
+
+// Chave da configuração → id do controle no painel.
+const SETTINGS_FIELDS = {
+  theme: 'set-theme',
+  fontFamily: 'set-fontfamily',
+  fontSize: 'set-fontsize',
+  lineHeight: 'set-lineheight',
+  tabMode: 'set-tabmode',
+  tabSize: 'set-tabsize',
+  detectIndentation: 'set-detectindent',
+  wordWrap: 'set-wordwrap',
+  lineNumbers: 'set-linenumbers',
+  renderWhitespace: 'set-whitespace',
+  cursorBlinking: 'set-cursor',
+  minimap: 'set-minimap',
+  smoothScrolling: 'set-smooth',
+  autoSave: 'set-autosave',
+  appTheme: 'set-apptheme',
+  uiFontSize: 'set-uifont',
+  sidebarWidth: 'set-sidebar',
+  treeIcons: 'set-treeicons',
+  terminalFontSize: 'set-termfont',
+};
+
+const BOOL_SETTINGS = new Set(['detectIndentation', 'minimap', 'smoothScrolling', 'autoSave', 'treeIcons']);
+
+let settings = { ...SETTINGS_DEFAULTS };
+let settingsSaveTimer = null;
+let autoSaveTimer = null;
+
+const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+/** Aceita só chaves conhecidas, do tipo certo e dentro da faixa — o arquivo vem do disco. */
+function sanitizeSettings(raw) {
+  const next = { ...SETTINGS_DEFAULTS };
+  if (!raw || typeof raw !== 'object') return next;
+
+  for (const [key, fallback] of Object.entries(SETTINGS_DEFAULTS)) {
+    const value = raw[key];
+    if (value === undefined) continue;
+
+    if (typeof fallback === 'boolean') {
+      if (typeof value === 'boolean') next[key] = value;
+    } else if (typeof fallback === 'number') {
+      const [min, max] = SETTING_RANGES[key];
+      if (typeof value === 'number' && Number.isFinite(value)) next[key] = clamp(value, min, max);
+    } else if (typeof value === 'string' && value.trim() && value.length <= 200) {
+      next[key] = value;
+    }
+  }
+
+  for (const [key, allowed] of Object.entries(SETTING_ENUMS)) {
+    if (!allowed.includes(next[key])) next[key] = SETTINGS_DEFAULTS[key];
+  }
+
+  return next;
+}
+
+function readSettingsForm() {
+  const next = { ...settings };
+
+  for (const [key, id] of Object.entries(SETTINGS_FIELDS)) {
+    const input = $(id);
+    if (!input) continue;
+
+    if (BOOL_SETTINGS.has(key)) {
+      next[key] = input.checked;
+    } else if (SETTING_RANGES[key]) {
+      const [min, max] = SETTING_RANGES[key];
+      const value = Number(input.value);
+      next[key] = Number.isFinite(value) && input.value !== '' ? clamp(value, min, max) : SETTINGS_DEFAULTS[key];
+    } else {
+      next[key] = input.value;
+    }
+  }
+
+  return sanitizeSettings(next);
+}
+
+function fillSettingsForm() {
+  for (const [key, id] of Object.entries(SETTINGS_FIELDS)) {
+    const input = $(id);
+    if (!input) continue;
+    if (BOOL_SETTINGS.has(key)) input.checked = settings[key];
+    else input.value = String(settings[key]);
+  }
+}
+
+function applySettings({ persist = true } = {}) {
+  const root = document.documentElement.style;
+  document.body.classList.toggle('light', settings.appTheme === 'light');
+  root.setProperty('--ui-font-size', `${settings.uiFontSize}px`);
+  root.setProperty('--sidebar-width', `${settings.sidebarWidth}px`);
+  root.setProperty('--term-font-size', `${settings.terminalFontSize}px`);
+  els.tree.classList.toggle('no-icons', !settings.treeIcons);
+
+  if (window.monaco && view) {
+    window.monaco.editor.setTheme(settings.theme);
+    view.updateOptions({
+      fontFamily: settings.fontFamily,
+      fontSize: settings.fontSize,
+      lineHeight: settings.lineHeight,
+      tabSize: settings.tabSize,
+      insertSpaces: settings.tabMode === 'space',
+      detectIndentation: settings.detectIndentation,
+      wordWrap: settings.wordWrap,
+      lineNumbers: settings.lineNumbers,
+      renderWhitespace: settings.renderWhitespace,
+      cursorBlinking: settings.cursorBlinking,
+      minimap: { enabled: settings.minimap },
+      smoothScrolling: settings.smoothScrolling,
+    });
+
+    // A indentação é opção de modelo: aplica também nos arquivos já abertos.
+    for (const model of window.monaco.editor.getModels()) {
+      model.updateOptions({
+        tabSize: settings.tabSize,
+        insertSpaces: settings.tabMode === 'space',
+        detectIndentation: settings.detectIndentation,
+      });
+    }
+
+  }
+
+  if (persist) scheduleSettingsSave();
+}
+
+function scheduleSettingsSave() {
+  clearTimeout(settingsSaveTimer);
+  settingsSaveTimer = setTimeout(saveSettings, 400);
+}
+
+async function saveSettings() {
+  try {
+    const res = await fetch('/api/savesettings', {
+      method: 'POST',
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) throw new Error((await res.text()).trim());
+  } catch (err) {
+    setStatus('erro ao salvar configurações: ' + err.message);
+  }
+}
+
+async function loadSettings() {
+  try {
+    const res = await fetch('/api/settings');
+    if (!res.ok) throw new Error((await res.text()).trim());
+    settings = sanitizeSettings(await res.json());
+  } catch (err) {
+    settings = { ...SETTINGS_DEFAULTS };
+    setStatus('usando configurações padrão: ' + err.message);
+  }
+}
+
+function openSettings() {
+  fillSettingsForm();
+  els.settings.hidden = false;
+  const first = document.getElementById('set-theme');
+  if (first) first.focus();
+}
+
+function closeSettings() {
+  els.settings.hidden = true;
+}
+
+function bindSettings() {
+  $('btnsettings').addEventListener('click', openSettings);
+  $('setclose').addEventListener('click', closeSettings);
+
+  $('setreset').addEventListener('click', () => {
+    settings = { ...SETTINGS_DEFAULTS };
+    fillSettingsForm();
+    applySettings();
+    setStatus('configurações restauradas ao padrão');
+  });
+
+  const onChange = () => {
+    settings = readSettingsForm();
+    applySettings();
+  };
+  els.settings.addEventListener('input', onChange);
+  els.settings.addEventListener('change', onChange);
+  els.settings.addEventListener('pointerdown', (event) => {
+    if (event.target === els.settings) closeSettings();
+  });
+}
+
+/** Salva sozinho ~1s depois da última edição, quando ativado. */
+function scheduleAutoSave() {
+  if (!settings.autoSave) return;
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    if (!settings.autoSave) return;
+    const entry = activePath ? models.get(activePath) : null;
+    if (entry && entry.model.getValue() !== entry.saved) saveActiveFile();
+  }, 900);
+}
+
 function startEditor() {
   const monaco = window.monaco;
   view = monaco.editor.create(els.editorEl, {
     value: '',
     language: 'plaintext',
-    theme: 'vs-dark',
+    theme: settings.theme,
     automaticLayout: true,
-    minimap: { enabled: false },
     scrollBeyondLastLine: false,
     renderLineHighlight: 'line',
-    cursorBlinking: 'smooth',
-    fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-    fontSize: 13,
-    tabSize: 2,
     padding: { top: 10, bottom: 10 },
   });
 
   view.onDidChangeCursorPosition((event) => {
     els.statuspos.textContent = `Ln ${event.position.lineNumber}, Col ${event.position.column}`;
   });
-  view.onDidChangeModelContent(updateDirty);
+  view.onDidChangeModelContent(() => {
+    updateDirty();
+    scheduleAutoSave();
+  });
+
+  applySettings({ persist: false });
 }
 
 function updateDirty() {
@@ -1209,7 +1650,14 @@ function bindTerminal() {
   els.termout.addEventListener('click', () => els.cmdinput.focus());
 
   window.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeMenu();
+    if (event.key === 'Escape') {
+      closeMenu();
+      closeSettings();
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+      event.preventDefault();
+      openSettings();
+    }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
       event.preventDefault();
       saveActiveFile();
@@ -1222,8 +1670,10 @@ function bindTerminal() {
 // ---------------------------------------------------------------------------
 (async function init() {
   bindTerminal();
+  bindSettings();
   try {
     await loadMonaco();
+    await loadSettings();
     startEditor();
     setStatus('editor pronto');
 

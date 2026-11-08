@@ -1,6 +1,7 @@
 use crate::assets::Assets;
 use crate::fsapi::FsState;
 use crate::jobs::Jobs;
+use crate::settings::Settings;
 use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ pub(super) fn serve(
     assets: &Assets,
     state: &Arc<Mutex<FsState>>,
     jobs: &Arc<Jobs>,
+    settings: &Arc<Settings>,
     request: &Request<Vec<u8>>,
 ) -> Result<Response<Body>> {
     let uri = request.uri();
@@ -21,7 +23,7 @@ pub(super) fn serve(
     let query = uri.query();
 
     if let Some(route) = path.strip_prefix("/api/") {
-        return Ok(api(route, query, request.body(), state, jobs));
+        return Ok(api(route, query, request.body(), state, jobs, settings));
     }
 
     let rel = if path == "/" { "index.html" } else { path.as_str() };
@@ -45,6 +47,7 @@ fn api(
     body: &[u8],
     state: &Arc<Mutex<FsState>>,
     jobs: &Arc<Jobs>,
+    settings: &Arc<Settings>,
 ) -> Response<Body> {
     match route {
         "root" => {
@@ -64,6 +67,8 @@ fn api(
         "cd" => cd(param(query, "path"), state),
         "exec" => exec(param(query, "cmd").unwrap_or_default(), state, jobs),
         "poll" => poll(param(query, "id"), jobs),
+        "settings" => settings_get(settings),
+        "savesettings" => settings_save(body, settings),
         _ => plain(
             StatusCode::NOT_FOUND,
             &format!("rota desconhecida: /api/{route}"),
@@ -355,6 +360,20 @@ fn poll(id: Option<String>, jobs: &Arc<Jobs>) -> Response<Body> {
             "code": code,
         })),
         Err(err) => plain(StatusCode::NOT_FOUND, &err),
+    }
+}
+
+fn settings_get(settings: &Settings) -> Response<Body> {
+    match serde_json::from_str::<serde_json::Value>(&settings.load()) {
+        Ok(value) => json(value),
+        Err(_) => json(serde_json::json!({})),
+    }
+}
+
+fn settings_save(body: &[u8], settings: &Settings) -> Response<Body> {
+    match settings.save(body) {
+        Ok(()) => json(serde_json::json!({ "ok": true })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }
 }
 
