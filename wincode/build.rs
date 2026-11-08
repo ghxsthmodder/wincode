@@ -60,7 +60,7 @@ fn embed_exe_icon(manifest_dir: &Path) {
     #[cfg(windows)]
     {
         let mut resource = winresource::WindowsResource::new();
-        resource.set_icon(&icon);
+        resource.set_icon(&icon.to_string_lossy());
         if let Err(err) = resource.compile() {
             println!("cargo:warning=não foi possível embutir o ícone do .exe: {err}");
         }
