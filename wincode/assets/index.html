@@ -79,8 +79,10 @@
     background: var(--panel); border-bottom: 1px solid var(--border);
     font-size: 12px; color: var(--muted);
   }
-  .tab { color: var(--text); }
+  .tab { color: var(--text); display: inline-flex; align-items: center; gap: 6px; }
+  .tab[hidden] { display: none; }
   .tab.dirty { color: var(--accent2); }
+  .tab .tabicon { width: 14px; height: 14px; flex: 0 0 auto; }
   .editor { min-height: 0; position: relative; }
 
   .terminal {
@@ -185,7 +187,10 @@
 
       <main class="main">
         <div class="editor-head">
-          <span id="tab" class="tab" hidden></span>
+          <span id="tab" class="tab" hidden>
+            <img id="tabicon" class="tabicon" alt="">
+            <span id="tabname"></span>
+          </span>
         </div>
         <div id="editor" class="editor"></div>
 
@@ -220,6 +225,8 @@ const els = {
   tree: $('tree'),
   editorEl: $('editor'),
   tab: $('tab'),
+  tabicon: $('tabicon'),
+  tabname: $('tabname'),
   termout: $('termout'),
   cmdinput: $('cmdinput'),
   prompt: $('prompt'),
@@ -335,8 +342,15 @@ function updateDirty() {
   const dirty = !!entry && entry.model.getValue() !== entry.saved;
   els.tab.hidden = !activePath;
   els.tab.classList.toggle('dirty', dirty);
-  els.tab.textContent = activePath ? `${dirty ? '● ' : ''}${baseName(activePath)}` : '';
-  document.title = `Wincode — ${baseName(activePath || state.root)}${dirty ? ' •' : ''}`;
+
+  const name = activePath ? baseName(activePath) : '';
+  els.tabname.textContent = activePath ? `${dirty ? '● ' : ''}${name}` : '';
+  els.tabicon.hidden = !activePath;
+  els.tabicon.src = activePath ? iconFor(name, false) : '';
+
+  const label = name || baseName(state.root);
+  const glyph = titleGlyph(activePath ? iconIdFor(name, false) : FOLDER_ICON);
+  document.title = `${glyph} ${label} — Wincode${dirty ? ' •' : ''}`;
 }
 
 async function openFile(requestedPath) {
@@ -817,19 +831,62 @@ const ICON_BY_FOLDER = {
   '.cache': 'folder-temp',
 };
 
-function iconFor(name, isDir) {
+function iconIdFor(name, isDir) {
   const lower = String(name || '').toLowerCase();
 
-  if (isDir) {
-    return `${ICON_BASE}/${ICON_BY_FOLDER[lower] || FOLDER_ICON}.svg`;
-  }
+  if (isDir) return ICON_BY_FOLDER[lower] || FOLDER_ICON;
 
-  if (ICON_BY_NAME[lower]) return `${ICON_BASE}/${ICON_BY_NAME[lower]}.svg`;
-  if (lower.startsWith('.env')) return `${ICON_BASE}/settings.svg`;
+  if (ICON_BY_NAME[lower]) return ICON_BY_NAME[lower];
+  if (lower.startsWith('.env')) return 'settings';
 
   const dot = lower.lastIndexOf('.');
   const ext = dot > 0 ? lower.slice(dot + 1) : '';
-  return `${ICON_BASE}/${ICON_BY_EXT[ext] || 'document'}.svg`;
+  return ICON_BY_EXT[ext] || 'document';
+}
+
+function iconFor(name, isDir) {
+  return `${ICON_BASE}/${iconIdFor(name, isDir)}.svg`;
+}
+
+// A barra de título do Windows só aceita texto: o ícone ali é um glifo do tipo.
+const TITLE_GLYPH = {
+  rust: '🦀',
+  javascript: '🟨',
+  typescript: '🟦',
+  react: '⚛️',
+  python: '🐍',
+  go: '🐹',
+  java: '☕',
+  c: '🔧', cpp: '🔧', csharp: '🔧',
+  php: '🐘',
+  ruby: '💎',
+  swift: '🕊️',
+  kotlin: '🟪',
+  lua: '🌙',
+  dart: '🎯',
+  html: '🌐',
+  css: '🎨', sass: '🎨', less: '🎨',
+  json: '🧾', yaml: '🧾', toml: '🧾', xml: '🧾',
+  markdown: '📝',
+  database: '🗄️', table: '🗄️',
+  image: '🖼️', svg: '🖼️',
+  pdf: '📕',
+  zip: '🗜️',
+  lock: '🔒',
+  git: '🔀',
+  docker: '🐳',
+  license: '📜', changelog: '📜',
+  readme: '📖',
+  settings: '⚙️', key: '🔑', exe: '⚙️', dll: '⚙️',
+  font: '🔤',
+  console: '⌨️', powershell: '⌨️',
+  npm: '📦', nodejs: '📦',
+  makefile: '🔨', cmake: '🔨',
+  'folder-base': '📁',
+};
+
+function titleGlyph(iconId) {
+  return TITLE_GLYPH[iconId] || '📄';
 }
 
 function makeNode(item, depth) {
