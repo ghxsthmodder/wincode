@@ -1,11 +1,11 @@
 # Build
-codebuff-editor/target/
+wincode/target/
 
 # Cache do script de preparo do Monaco
-codebuff-editor/.cache/
+wincode/.cache/
 
 # Monaco é baixado por `node scripts/prepare-monaco.js` (não versionado)
-codebuff-editor/assets/monaco/
+wincode/assets/monaco/
 
 # Sistema
 .DS_Store
