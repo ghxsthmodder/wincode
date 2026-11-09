@@ -6,9 +6,11 @@ mod config;
 mod dialog;
 mod fonts;
 mod fsapi;
+mod index;
 mod jobs;
 mod protocol;
 mod recent;
+mod session;
 mod settings;
 
 use std::path::PathBuf;
@@ -94,6 +96,7 @@ fn run() -> Result<(), String> {
     let settings = Arc::new(settings::Settings::new());
     let fonts = Arc::new(fonts::Fonts::new());
     let recent = Arc::new(recent::Recent::new());
+    let sessions = Arc::new(session::Sessions::new());
 
     // O que veio pela CLI também entra na lista de recentes da tela inicial.
     {
@@ -115,8 +118,11 @@ fn run() -> Result<(), String> {
             let settings = settings.clone();
             let fonts = fonts.clone();
             let recent = recent.clone();
+            let sessions = sessions.clone();
             move |request| {
-                protocol::serve(&assets, &state, &jobs, &settings, &fonts, &recent, request)
+                protocol::serve(
+                    &assets, &state, &jobs, &settings, &fonts, &recent, &sessions, request,
+                )
             }
         });
 

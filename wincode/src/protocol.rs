@@ -3,6 +3,7 @@ use crate::fonts::Fonts;
 use crate::fsapi::FsState;
 use crate::jobs::Jobs;
 use crate::recent::Recent;
+use crate::session::Sessions;
 use crate::settings::Settings;
 use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
 use std::borrow::Cow;
@@ -20,6 +21,7 @@ pub(super) fn serve(
     settings: &Arc<Settings>,
     fonts: &Arc<Fonts>,
     recent: &Arc<Recent>,
+    sessions: &Arc<Sessions>,
     request: &Request<Vec<u8>>,
 ) -> Result<Response<Body>> {
     let uri = request.uri();
@@ -36,6 +38,7 @@ pub(super) fn serve(
             settings,
             fonts,
             recent,
+            sessions,
         ));
     }
 
@@ -78,6 +81,7 @@ fn api(
     settings: &Arc<Settings>,
     fonts: &Arc<Fonts>,
     recent: &Arc<Recent>,
+    sessions: &Arc<Sessions>,
 ) -> Response<Body> {
     match route {
         "root" => {
@@ -93,6 +97,12 @@ fn api(
             json(serde_json::json!({ "ok": true }))
         }
         "fonts" => json(fonts.list()),
+        "index" => index_files(state),
+        "session" => json(sessions.load(&param(query, "root").unwrap_or_default())),
+        "savesession" => match sessions.save(&param(query, "root").unwrap_or_default(), body) {
+            Ok(()) => json(serde_json::json!({ "ok": true })),
+            Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+        },
         "ls" => list(param(query, "path"), param(query, "scope"), state),
         "read" => read(param(query, "path"), state),
         "write" => write(param(query, "path"), body, state),
@@ -122,6 +132,22 @@ fn workspace_json(guard: &FsState) -> serde_json::Value {
         "singleFile": guard.open_file.is_some(),
         "selectionRequired": !guard.selected,
     })
+}
+
+/// Índice do projeto para a abertura rápida (Ctrl+P). Sem projeto, lista vazia.
+fn index_files(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let root = {
+        let guard = state.lock().unwrap();
+        if !guard.selected {
+            return json(serde_json::json!({ "files": [] }));
+        }
+        guard.root.clone()
+    };
+
+    match std::fs::canonicalize(&root) {
+        Ok(root) => json(serde_json::json!({ "files": crate::index::list(&root) })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &format!("pasta inválida: {err}")),
+    }
 }
 
 fn pick_folder(state: &Arc<Mutex<FsState>>, recent: &Arc<Recent>) -> Response<Body> {

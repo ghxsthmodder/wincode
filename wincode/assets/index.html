@@ -653,6 +653,8 @@ const state = {
   singleFile: '',
   recent: [],
   fontsDir: '',
+  // Índice de arquivos do Ctrl+P (caminhos relativos); null até pedir de novo.
+  fileIndex: null,
 };
 const models = new Map();
 let view = null;
@@ -743,6 +745,19 @@ const resolvePath = (path) => {
   const relative = value.replace(/^\.\//, '');
   // Sem projeto aberto o caminho fica como veio; o backend recusa com erro claro.
   return base ? `${base}/${relative}` : relative;
+};
+
+/** Caminho absoluto a partir de um item relativo do índice (Ctrl+P). */
+const joinRoot = (relative) => {
+  const root = String(state.root || '').replace(/[\\/]+$/, '');
+  const separator = root.includes('\\') ? '\\' : '/';
+  return `${root}${separator}${String(relative).split('/').join(separator)}`;
+};
+
+/** Pasta de um caminho relativo ("" quando o arquivo está na raiz). */
+const dirOf = (relative) => {
+  const normalized = String(relative || '').replace(/\\/g, '/');
+  return normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : '';
 };
 
 // ---------------------------------------------------------------------------
@@ -1451,6 +1466,7 @@ function paletteCommands() {
   const commands = [
     { title: 'abrir configurações', hint: 'Ctrl+,', run: openSettings },
     { title: 'salvar arquivo', hint: 'Ctrl+S', run: saveActiveFile },
+    { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
     { title: 'abrir arquivo…', run: chooseFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
@@ -1539,43 +1555,94 @@ function fuzzyScore(text, query) {
   return index;
 }
 
+/** Nome do arquivo pesa mais que o caminho inteiro; menor é melhor. */
+function fileScore(path, query) {
+  const nameScore = fuzzyScore(baseName(path), query);
+  if (nameScore >= 0) return nameScore;
+  const pathScore = fuzzyScore(path, query);
+  return pathScore < 0 ? -1 : pathScore + 200;
+}
+
+let paletteMode = 'commands';
 let paletteItems = [];
 let paletteIndex = 0;
 
+/** Comandos filtrados pela paleta (Ctrl+Shift+P). */
+function commandItems(query) {
+  const all = paletteCommands();
+  if (!query) return all;
+  return all
+    .map((command, order) => ({ command, order, score: fuzzyScore(command.title, query) }))
+    .filter((entry) => entry.score >= 0)
+    .sort((a, b) => a.score - b.score || a.order - b.order)
+    .map((entry) => entry.command);
+}
+
+/**
+ * Arquivos do projeto para o Ctrl+P: as abas abertas vêm primeiro (é o que se
+ * procura com mais frequência) e depois o índice da pasta.
+ */
+function quickOpenItems(query) {
+  const items = [];
+
+  for (const path of models.keys()) {
+    if (query && fileScore(path, query) < 0) continue;
+    items.push({ title: baseName(path), hint: 'aba', run: () => openFile(path) });
+  }
+
+  const files = Array.isArray(state.fileIndex) ? state.fileIndex : [];
+  const matches = [];
+  for (const relative of files) {
+    const score = query ? fileScore(relative, query) : 0;
+    if (score >= 0) matches.push({ relative, score });
+  }
+  matches.sort((a, b) => a.score - b.score || a.relative.length - b.relative.length
+    || a.relative.localeCompare(b.relative));
+
+  for (const { relative } of matches.slice(0, 60)) {
+    const path = joinRoot(relative);
+    if (models.has(path)) continue;
+    items.push({
+      title: baseName(relative),
+      hint: dirOf(relative) || '.',
+      run: () => openFile(path),
+    });
+  }
+
+  return items.slice(0, 80);
+}
+
 function renderPalette() {
   const query = els.paletteinput.value.trim();
-  const all = paletteCommands();
-  paletteItems = query
-    ? all
-        .map((command, order) => ({ command, order, score: fuzzyScore(command.title, query) }))
-        .filter((entry) => entry.score >= 0)
-        .sort((a, b) => a.score - b.score || a.order - b.order)
-        .map((entry) => entry.command)
-    : all;
+  paletteItems = paletteMode === 'files' ? quickOpenItems(query) : commandItems(query);
 
   paletteIndex = 0;
-  els.palettelist.innerHTML = '';
+  els.palettelist.replaceChildren();
 
   if (!paletteItems.length) {
     const empty = document.createElement('div');
     empty.className = 'palette-empty dim';
-    empty.textContent = 'nenhum comando encontrado';
+    empty.textContent = paletteMode === 'files'
+      ? (state.selectionRequired
+          ? 'abra uma pasta para buscar arquivos'
+          : (query ? 'nenhum arquivo encontrado' : 'nenhum arquivo no índice'))
+      : 'nenhum comando encontrado';
     els.palettelist.append(empty);
     return;
   }
 
-  paletteItems.forEach((command, index) => {
+  paletteItems.forEach((item, index) => {
     const row = document.createElement('div');
     row.className = index === 0 ? 'palette-item active' : 'palette-item';
 
     const title = document.createElement('span');
-    title.textContent = command.title;
+    title.textContent = item.title;
     row.append(title);
 
-    if (command.hint) {
+    if (item.hint) {
       const hint = document.createElement('span');
       hint.className = 'hint dim';
-      hint.textContent = command.hint;
+      hint.textContent = item.hint;
       row.append(hint);
     }
 
@@ -1600,11 +1667,53 @@ function runPaletteCommand(index) {
   command.run();
 }
 
+function setPaletteMode(mode) {
+  paletteMode = mode;
+  els.paletteinput.placeholder = mode === 'files'
+    ? 'digite para abrir um arquivo…'
+    : 'digite um comando…';
+}
+
 function openPalette() {
+  setPaletteMode('commands');
   els.paletteinput.value = '';
   els.palette.hidden = false;
   renderPalette();
   els.paletteinput.focus();
+}
+
+/** Ctrl+P: índice preguiçoso — só a primeira abertura da pasta paga a varredura. */
+function openQuickOpen() {
+  setPaletteMode('files');
+  els.paletteinput.value = '';
+  els.palette.hidden = false;
+  els.paletteinput.focus();
+
+  if (Array.isArray(state.fileIndex)) {
+    renderPalette();
+    return;
+  }
+
+  const loading = document.createElement('div');
+  loading.className = 'palette-empty dim';
+  loading.textContent = 'indexando arquivos…';
+  els.palettelist.replaceChildren(loading);
+
+  ensureFileIndex().then(() => {
+    if (paletteMode === 'files' && !els.palette.hidden) renderPalette();
+  });
+}
+
+async function ensureFileIndex() {
+  if (Array.isArray(state.fileIndex)) return;
+  try {
+    const data = await apiJson('/api/index');
+    state.fileIndex = Array.isArray(data.files) ? data.files : [];
+    setStatus(`índice: ${state.fileIndex.length} arquivo${state.fileIndex.length === 1 ? '' : 's'}`);
+  } catch (err) {
+    state.fileIndex = [];
+    setStatus('índice indisponível: ' + err.message);
+  }
 }
 
 function closePalette() {
@@ -1616,15 +1725,29 @@ function bindPalette() {
   window.addEventListener(
     'keydown',
     (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'p') {
+      const ctrl = event.ctrlKey || event.metaKey;
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === 'p') {
         event.preventDefault();
         openPalette();
+        return;
+      }
+      if (ctrl && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        openQuickOpen();
       }
     },
     true,
   );
 
-  els.paletteinput.addEventListener('input', renderPalette);
+  els.paletteinput.addEventListener('input', () => {
+    // No Ctrl+P, digitar ">" vira paleta de comandos (como no VSCode).
+    if (paletteMode === 'files' && els.paletteinput.value.startsWith('>')) {
+      paletteMode = 'commands';
+      els.paletteinput.value = els.paletteinput.value.slice(1).trimStart();
+      els.paletteinput.placeholder = 'digite um comando…';
+    }
+    renderPalette();
+  });
   els.paletteinput.addEventListener('keydown', (event) => {
     if (event.key === 'ArrowDown') {
       event.preventDefault();
@@ -1660,6 +1783,17 @@ function startEditor() {
 
   view.onDidChangeCursorPosition((event) => {
     els.statuspos.textContent = `Ln ${event.position.lineNumber}, Col ${event.position.column}`;
+    const entry = activePath ? models.get(activePath) : null;
+    if (entry) {
+      entry.cursor = { line: event.position.lineNumber, column: event.position.column };
+      entry.scrollTop = view.getScrollTop();
+    }
+    scheduleSessionSave();
+  });
+  view.onDidScrollChange(() => {
+    const entry = activePath ? models.get(activePath) : null;
+    if (entry) entry.scrollTop = view.getScrollTop();
+    scheduleSessionSave();
   });
   view.onDidChangeModelContent(() => {
     updateDirty();
@@ -1756,6 +1890,7 @@ function selectFile(path) {
   view.focus();
   updateDirty();
   highlightActiveRow();
+  scheduleSessionSave();
 }
 
 async function closeFile(path) {
@@ -1793,6 +1928,7 @@ async function closeFile(path) {
   renderTabs();
   updateDirty();
   highlightActiveRow();
+  scheduleSessionSave();
   setStatus(`fechado ${baseName(path)}`);
 }
 
@@ -1838,6 +1974,7 @@ async function openFile(requestedPath) {
     renderTabs();
     highlightActiveRow();
     updateDirty();
+    scheduleSessionSave();
     setStatus(`aberto ${baseName(path)}`);
   } catch (err) {
     setStatus('erro ao abrir: ' + err.message);
@@ -1984,8 +2121,11 @@ function showMenu(x, y, entries) {
   if (rect.bottom > window.innerHeight - 6) menu.style.top = `${Math.max(6, window.innerHeight - rect.height - 6)}px`;
 }
 
-/** Diálogo próprio: `prompt()`/`confirm()` não são confiáveis no WebView2. */
-function showDialog({ title, message = '', value, confirmLabel = 'ok', danger = false }) {
+/**
+ * Diálogo próprio: `prompt()`/`confirm()` não são confiáveis no WebView2.
+ * Com `altLabel`, a terceira opção resolve `'alt'` (usada para descartar).
+ */
+function showDialog({ title, message = '', value, confirmLabel = 'ok', altLabel = '', danger = false }) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
@@ -2022,7 +2162,17 @@ function showDialog({ title, message = '', value, confirmLabel = 'ok', danger = 
     confirmButton.type = 'button';
     confirmButton.textContent = confirmLabel;
     confirmButton.className = danger ? 'danger' : 'primary';
-    actions.append(cancel, confirmButton);
+    actions.append(cancel);
+
+    if (altLabel) {
+      const alt = document.createElement('button');
+      alt.type = 'button';
+      alt.textContent = altLabel;
+      alt.addEventListener('click', () => finish('alt'));
+      actions.append(alt);
+    }
+
+    actions.append(confirmButton);
     dialog.append(actions);
     overlay.append(dialog);
     document.body.append(overlay);
@@ -2128,6 +2278,7 @@ async function createEntry(dir, kind) {
       { method: 'POST' },
     );
     state.expanded.add(targetDir);
+    state.fileIndex = null;
     await refreshTree();
     setStatus(`${isDir ? 'pasta criada' : 'arquivo criado'}: ${baseName(created.path)}`);
     if (!isDir) await openFile(created.path);
@@ -2157,6 +2308,7 @@ async function renameEntry(item) {
     migrateModels(item.path, result.path);
     remapExpanded(item.path, result.path);
     state.expanded.add(parentOf(result.path));
+    state.fileIndex = null;
     await refreshTree();
     await syncWorkspaceInfo();
     setStatus(`renomeado: ${item.name} → ${baseName(result.path)}`);
@@ -2179,6 +2331,7 @@ async function deleteEntry(item) {
   try {
     await apiJson(api('/api/delete', { path: item.path }), { method: 'POST' });
     dropModelsUnder(item.path);
+    state.fileIndex = null;
     await refreshTree();
     await syncWorkspaceInfo();
     setStatus(`excluído: ${item.name}`);
@@ -2573,9 +2726,11 @@ function makeNode(item, depth) {
       pruneExpanded(item.path);
       // Ao reabrir, relê só esta pasta: o que mudou enquanto estava fechada aparece.
       loaded = false;
+      scheduleSessionSave();
       return;
     }
     state.expanded.add(item.path);
+    scheduleSessionSave();
     if (loaded) return;
     loaded = true;
     await loadChildren();
@@ -2741,6 +2896,156 @@ async function watchTick() {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Sessão por projeto (abas, cursores e pastas expandidas)
+// ---------------------------------------------------------------------------
+let sessionTimer = null;
+let sessionRestoring = false;
+
+/** Só projeto completo tem sessão: arquivo avulso não sobrescreve a do projeto. */
+const sessionRoot = () => (
+  !state.singleFile && state.root && !state.selectionRequired ? state.root : ''
+);
+
+function scheduleSessionSave() {
+  if (sessionRestoring || !sessionRoot()) return;
+  clearTimeout(sessionTimer);
+  sessionTimer = setTimeout(saveSession, 800);
+}
+
+async function saveSession() {
+  const root = sessionRoot();
+  if (!root) return;
+  clearTimeout(sessionTimer);
+
+  const payload = {
+    version: 1,
+    active: activePath || '',
+    tabs: Array.from(models, ([path, entry]) => ({
+      path,
+      line: entry.cursor?.line || 1,
+      column: entry.cursor?.column || 1,
+      scroll: Math.max(0, Math.round(entry.scrollTop || 0)),
+    })),
+    expanded: Array.from(state.expanded).slice(0, 200),
+  };
+
+  try {
+    const res = await fetch(api('/api/savesession', { root }), {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error((await res.text()).trim());
+  } catch {
+    // Sem persistência a sessão só não é lembrada na próxima abertura.
+  }
+}
+
+/** Cursor e rolagem guardados na sessão, aplicados depois de reabrir as abas. */
+function applySavedView() {
+  const entry = activePath ? models.get(activePath) : null;
+  if (!entry || !view) return;
+
+  if (entry.cursor) {
+    view.setPosition({
+      lineNumber: Math.min(Math.max(1, entry.cursor.line || 1), entry.model.getLineCount()),
+      column: Math.max(1, entry.cursor.column || 1),
+    });
+  }
+  if (entry.scrollTop) view.setScrollTop(entry.scrollTop);
+}
+
+/** Reabre as abas e as pastas da sessão anterior do projeto (se houver). */
+async function restoreSession() {
+  let saved = null;
+  try {
+    saved = await apiJson(api('/api/session', { root: state.root }));
+  } catch {
+    saved = null;
+  }
+
+  const tabs = saved && Array.isArray(saved.tabs) ? saved.tabs.slice(0, 24) : [];
+  for (const dir of Array.isArray(saved?.expanded) ? saved.expanded : []) {
+    if (typeof dir === 'string' && dir) state.expanded.add(dir);
+  }
+  await refreshTree();
+
+  sessionRestoring = true;
+  try {
+    for (const tab of tabs) {
+      const path = typeof tab?.path === 'string' ? tab.path : '';
+      if (!path) continue;
+      await openFile(path);
+      const entry = models.get(resolvePath(path));
+      if (!entry) continue;
+      entry.cursor = { line: Number(tab.line) || 1, column: Number(tab.column) || 1 };
+      entry.scrollTop = Math.max(0, Number(tab.scroll) || 0);
+    }
+
+    const active = typeof saved?.active === 'string' ? resolvePath(saved.active) : '';
+    if (active && models.has(active)) selectFile(active);
+  } finally {
+    sessionRestoring = false;
+  }
+
+  applySavedView();
+  return models.size > 0;
+}
+
+/** Abre um projeto e retoma a sessão anterior dele. */
+async function applyWorkspace(info) {
+  resetWorkspace(info);
+
+  if (info.singleFile) {
+    await refreshTree();
+    if (info.file) await openFile(info.file);
+    return;
+  }
+
+  await restoreSession();
+}
+
+/** Abas com edições pendentes (trocar de projeto fecha todas). */
+function dirtyTabs() {
+  return Array.from(models)
+    .filter(([, entry]) => entry.model.getValue() !== entry.saved)
+    .map(([path]) => path);
+}
+
+/**
+ * Antes de trocar de projeto: oferece salvar ou descartar as abas alteradas.
+ * `false` mantém o projeto atual aberto.
+ */
+async function confirmSwitch() {
+  const dirty = dirtyTabs();
+  if (!dirty.length) return true;
+
+  const names = dirty.slice(0, 6).map((path) => '· ' + baseName(path)).join('\n');
+  const more = dirty.length > 6 ? `\n… e mais ${dirty.length - 6}` : '';
+  const choice = await showDialog({
+    title: 'Abas com alterações',
+    message: `Estas abas ainda não foram salvas:\n\n${names}${more}\n\nAo trocar de projeto elas serão fechadas.`,
+    confirmLabel: 'salvar e trocar',
+    altLabel: 'descartar',
+    danger: true,
+  });
+
+  if (!choice) return false;
+  if (choice === 'alt') return true;
+
+  await saveAllFiles();
+  if (dirtyTabs().length) {
+    setStatus('troca cancelada: não foi possível salvar todas as abas');
+    return false;
+  }
+  return true;
+}
+
+/** Grava a sessão do projeto atual antes de a raiz mudar no backend. */
+async function leaveWorkspace() {
+  if (sessionRoot()) await saveSession();
+}
+
 /** Rótulo da barra de título: pasta do projeto ou o arquivo aberto sozinho. */
 function workspaceLabel() {
   if (state.selectionRequired || !state.root) return 'nenhuma pasta aberta';
@@ -2758,7 +3063,9 @@ function resetWorkspace(info) {
   updatePrompt();
   state.selectedDir = state.root;
   state.expanded.clear();
+  state.fileIndex = null;
   watchSignatures = new Map();
+  clearTimeout(sessionTimer);
 
   const previous = Array.from(models.values());
   models.clear();
@@ -2864,12 +3171,14 @@ async function forgetRecent(path) {
 }
 
 async function openRecent(path) {
+  // O backend troca a raiz no /api/open: confirma e grava a sessão antes.
+  if (!(await confirmSwitch())) return;
+  await leaveWorkspace();
+
   setStatus('abrindo ' + shortPath(path) + '…');
   try {
     const info = await apiJson(api('/api/open', { path }));
-    resetWorkspace(info);
-    await refreshTree();
-    if (info.file) await openFile(info.file);
+    await applyWorkspace(info);
     await loadRecent();
     setStatus('aberto ' + shortPath(info.file || info.root));
   } catch (err) {
@@ -2884,6 +3193,9 @@ async function openRecent(path) {
 }
 
 async function chooseFolder() {
+  if (!(await confirmSwitch())) return;
+  await leaveWorkspace();
+
   setStatus('escolhendo pasta…');
   try {
     const result = await apiJson('/api/pickfolder');
@@ -2891,8 +3203,7 @@ async function chooseFolder() {
       setStatus('pronto');
       return;
     }
-    resetWorkspace(result);
-    await refreshTree();
+    await applyWorkspace(result);
     await loadRecent();
     setStatus('pasta aberta: ' + shortPath(result.root));
     els.cmdinput.focus();
@@ -2902,6 +3213,9 @@ async function chooseFolder() {
 }
 
 async function chooseFile() {
+  if (!(await confirmSwitch())) return;
+  await leaveWorkspace();
+
   setStatus('escolhendo arquivo…');
   try {
     const result = await apiJson('/api/pickfile');
@@ -2909,9 +3223,7 @@ async function chooseFile() {
       setStatus('pronto');
       return;
     }
-    resetWorkspace(result);
-    await refreshTree();
-    await openFile(result.file);
+    await applyWorkspace(result);
     await loadRecent();
     setStatus('arquivo aberto: ' + shortPath(result.file));
   } catch (err) {
@@ -3186,8 +3498,8 @@ function bindTerminal() {
       els.tree.replaceChildren(emptyRow('nenhum projeto aberto', 0));
       setStatus('selecione uma pasta ou arquivo para começar');
     } else {
-      await refreshTree();
-      if (info.file) await openFile(info.file);
+      // applyWorkspace reabre as abas da sessão anterior desse projeto.
+      await applyWorkspace(info);
       updateDirty();
       els.cmdinput.focus();
     }

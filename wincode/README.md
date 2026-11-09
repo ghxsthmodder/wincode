@@ -39,8 +39,10 @@ wincode/
     config.rs               # pasta portátil wincodeconfig/ ao lado do .exe
     fsapi.rs                # raiz do projeto + resolução segura de caminhos
     fonts.rs                # fontes do usuário (lê a família do .ttf/.otf)
+    index.rs                # índice de arquivos da abertura rápida (Ctrl+P)
     jobs.rs                 # execução assíncrona dos comandos do terminal
     recent.rs               # projetos recentes da tela inicial
+    session.rs              # sessão por projeto (abas, cursores, pastas abertas)
     settings.rs             # preferências do editor (JSON no config do usuário)
 ```
 
@@ -136,6 +138,33 @@ Cada arquivo aberto vira uma aba acima do editor:
 A ordem das abas segue a ordem de abertura, e a paleta (`Ctrl+Shift+P`) também
 oferece **fechar arquivo atual**.
 
+## Abertura rápida (Ctrl+P)
+
+`Ctrl+P` abre a busca de arquivos do projeto: as abas abertas aparecem primeiro e, abaixo,
+o índice da pasta. O filtro é por subsequência e dá peso ao **nome** do arquivo
+(`apconf` acha `app.config.json`), com a pasta relativa à direita; `Enter` abre (ou só
+troca para a aba, se já estiver aberta) e `↑`/`↓` navegam. Digitar `>` na primeira posição
+troca para a paleta de comandos.
+
+O índice é montado na primeira abertura e fica em memória enquanto a pasta estiver aberta
+(criar, renomear ou excluir arquivos o invalida). Para não varrer o que ninguém abre,
+ficam de fora `node_modules`, `.git`, `target`, `dist`, `build`, `.venv`, `__pycache__` e
+outras pastas de cache/saída, com teto de 8000 arquivos e profundidade 16.
+
+## Sessão por projeto
+
+Cada projeto guarda sua sessão em `wincodeconfig/sessions/<chave>.json`, com chave
+derivada do caminho (sem diferenciar maiúsculas nem barras): abas abertas, aba ativa,
+linha/coluna e rolagem de cada uma, e as pastas expandidas. Ao abrir a pasta — pelo painel
+inicial, pela lista de recentes ou pela CLI — o editor **volta onde parou**; um projeto
+aberto pela primeira vez continua caindo no painel inicial.
+
+Trocar de projeto com abas alteradas abre um diálogo com **salvar e trocar** (padrão),
+**descartar** e **cancelar**: nada é fechado sem escolha. A sessão do projeto que sai é
+gravada antes da troca, então voltar para ele reabre as mesmas abas nos mesmos lugares.
+No modo arquivo único nada é gravado — abrir um arquivo avulso não sobrescreve a sessão
+cujo caminho o contém.
+
 ## Gerenciamento de arquivos e pastas
 
 No **Explorador**, use o menu **⋯** no topo do painel (abrir pasta/arquivo, recarregar,
@@ -221,13 +250,15 @@ relê). A URL leva `?v=<mtime>`, então substituir o arquivo invalida o cache do
 
 ## Paleta de comandos
 
-`Ctrl+Shift+P` abre a paleta, que reaproveita o mesmo modal das configurações. Digite
-para filtrar (casamento por subsequência: `cfg` acha *configurações*), navegue com
-`↑`/`↓` e execute com `Enter`.
+`Ctrl+Shift+P` abre a paleta, que reaproveita o mesmo modal das configurações e da
+abertura rápida. Digite para filtrar (casamento por subsequência: `cfg` acha
+*configurações*), navegue com `↑`/`↓` e execute com `Enter`. Dentro do `Ctrl+P`,
+digitar `>` troca para a paleta.
 
 Comandos disponíveis:
 
-- **arquivo**: salvar, renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
+- **arquivo**: abrir rapidamente (Ctrl+P), salvar, renomear e excluir o arquivo atual,
+  novo arquivo/pasta, recarregar a árvore
 - **projeto**: abrir pasta/arquivo, mostrar/ocultar explorador, abas e terminal, focar e limpar o terminal
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
@@ -242,6 +273,7 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+Shift+S` — salva todas as abas com alterações
 - `Ctrl+W` — fecha a aba atual (pede confirmação se houver alterações)
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` — próxima/anterior, na ordem de abertura
+- `Ctrl+P` — abertura rápida de arquivos do projeto (`>` troca para a paleta)
 - `Ctrl+G` — vai para uma linha
 - `Ctrl+=` / `Ctrl+-` / `Ctrl+0` — aumenta, diminui ou volta a fonte do editor ao padrão
 - `Shift+Alt+F` — formata o documento nas linguagens com formatador no Monaco
@@ -287,10 +319,10 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 
 ## Limitações atuais
 
-- A troca de pasta recomeça a sessão: arquivos abertos e modelos do Monaco são descartados
-  (alterações não salvas são perdidas — salve antes de trocar).
-- No modo arquivo único, abrir outros arquivos (pelo terminal ou por `Ctrl+P` no futuro) cria
-  abas normalmente, mas o explorador continua mostrando só o arquivo escolhido; use
+- A troca de projeto fecha as abas; o diálogo oferece salvar ou descartar, e a sessão
+  (abas, cursores, pastas expandidas) volta ao reabrir — mas o conteúdo descartado não.
+- No modo arquivo único, abrir outros arquivos (pelo terminal ou pelo `Ctrl+P`) cria abas
+  normalmente, mas o explorador continua mostrando só o arquivo escolhido; use
   **abrir pasta…** para voltar à árvore do projeto.
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
   que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
