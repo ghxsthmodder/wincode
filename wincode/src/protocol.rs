@@ -98,6 +98,7 @@ fn api(
         }
         "fonts" => json(fonts.list()),
         "index" => index_files(state),
+        "search" => search_files(param(query, "q"), state),
         "session" => json(sessions.load(&param(query, "root").unwrap_or_default())),
         "savesession" => match sessions.save(&param(query, "root").unwrap_or_default(), body) {
             Ok(()) => json(serde_json::json!({ "ok": true })),
@@ -146,6 +147,31 @@ fn index_files(state: &Arc<Mutex<FsState>>) -> Response<Body> {
 
     match std::fs::canonicalize(&root) {
         Ok(root) => json(serde_json::json!({ "files": crate::index::list(&root) })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &format!("pasta inválida: {err}")),
+    }
+}
+
+/// Busca textual no projeto (Ctrl+Shift+F). Uma letra custaria a varredura toda,
+/// então só a partir de dois caracteres.
+fn search_files(query: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let query = query.unwrap_or_default();
+    if query.chars().count() > 200 {
+        return plain(StatusCode::BAD_REQUEST, "busca longa demais");
+    }
+    if query.trim().chars().count() < 2 {
+        return json(serde_json::json!({ "files": [], "truncated": false }));
+    }
+
+    let root = {
+        let guard = state.lock().unwrap();
+        if !guard.selected {
+            return json(serde_json::json!({ "files": [], "truncated": false }));
+        }
+        guard.root.clone()
+    };
+
+    match std::fs::canonicalize(&root) {
+        Ok(root) => json(crate::search::run(&root, &query)),
         Err(err) => plain(StatusCode::BAD_REQUEST, &format!("pasta inválida: {err}")),
     }
 }

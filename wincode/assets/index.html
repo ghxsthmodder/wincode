@@ -275,7 +275,8 @@
     display: flex; align-items: center; gap: 12px;
     padding: 6px 10px; border-radius: 4px; cursor: pointer;
   }
-  .palette-item .hint { margin-left: auto; font-size: 11px; }
+  .palette-item .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .palette-item .hint { margin-left: auto; font-size: 11px; flex: 0 0 auto; padding-left: 12px; }
   .palette-item.active { background: rgba(137,180,250,.18); }
   body.light .palette-item.active { background: rgba(37,99,235,.14); }
   .palette-empty { padding: 12px; text-align: center; }
@@ -1467,6 +1468,7 @@ function paletteCommands() {
     { title: 'abrir configurações', hint: 'Ctrl+,', run: openSettings },
     { title: 'salvar arquivo', hint: 'Ctrl+S', run: saveActiveFile },
     { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
+    { title: 'buscar em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
     { title: 'abrir arquivo…', run: chooseFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
@@ -1567,6 +1569,10 @@ let paletteMode = 'commands';
 let paletteItems = [];
 let paletteIndex = 0;
 
+let searchTimer = null;
+let searchToken = 0;
+let searchState = { query: '', results: [], loading: false, truncated: false };
+
 /** Comandos filtrados pela paleta (Ctrl+Shift+P). */
 function commandItems(query) {
   const all = paletteCommands();
@@ -1612,9 +1618,49 @@ function quickOpenItems(query) {
   return items.slice(0, 80);
 }
 
+/** Ocorrências da busca em arquivos (Ctrl+Shift+F), achatadas em linhas. */
+function searchItems() {
+  const items = [];
+
+  for (const file of searchState.results) {
+    const path = joinRoot(file.path);
+    for (const hit of Array.isArray(file.hits) ? file.hits : []) {
+      items.push({
+        title: String(hit.text || '').trim() || '(linha em branco)',
+        hint: `${baseName(file.path)}:${hit.line}`,
+        run: () => openAt(path, hit.line, hit.column),
+      });
+    }
+  }
+
+  return items.slice(0, 200);
+}
+
+/** Abre o arquivo (ou troca para a aba) e posiciona o cursor na ocorrência. */
+async function openAt(path, line, column) {
+  await openFile(path);
+  const entry = models.get(resolvePath(path));
+  if (!entry || !view) return;
+
+  const target = {
+    lineNumber: Math.min(Math.max(1, Number(line) || 1), entry.model.getLineCount()),
+    column: Math.max(1, Number(column) || 1),
+  };
+  view.setPosition(target);
+  view.revealLineInCenter(target.lineNumber);
+  entry.cursor = target;
+  entry.scrollTop = view.getScrollTop();
+  view.focus();
+  scheduleSessionSave();
+}
+
 function renderPalette() {
   const query = els.paletteinput.value.trim();
-  paletteItems = paletteMode === 'files' ? quickOpenItems(query) : commandItems(query);
+  paletteItems = paletteMode === 'files'
+    ? quickOpenItems(query)
+    : paletteMode === 'search'
+      ? searchItems()
+      : commandItems(query);
 
   paletteIndex = 0;
   els.palettelist.replaceChildren();
@@ -1626,7 +1672,13 @@ function renderPalette() {
       ? (state.selectionRequired
           ? 'abra uma pasta para buscar arquivos'
           : (query ? 'nenhum arquivo encontrado' : 'nenhum arquivo no índice'))
-      : 'nenhum comando encontrado';
+      : paletteMode === 'search'
+        ? (searchState.loading
+            ? 'buscando…'
+            : (searchState.query.length < 2
+                ? (state.selectionRequired ? 'abra uma pasta para buscar arquivos' : 'digite ao menos 2 caracteres')
+                : 'nenhum resultado'))
+        : 'nenhum comando encontrado';
     els.palettelist.append(empty);
     return;
   }
@@ -1636,6 +1688,7 @@ function renderPalette() {
     row.className = index === 0 ? 'palette-item active' : 'palette-item';
 
     const title = document.createElement('span');
+    title.className = 'title';
     title.textContent = item.title;
     row.append(title);
 
@@ -1669,9 +1722,16 @@ function runPaletteCommand(index) {
 
 function setPaletteMode(mode) {
   paletteMode = mode;
+  // Sair da busca descarta respostas que ainda estejam a caminho.
+  if (mode !== 'search') {
+    searchToken += 1;
+    clearTimeout(searchTimer);
+  }
   els.paletteinput.placeholder = mode === 'files'
     ? 'digite para abrir um arquivo…'
-    : 'digite um comando…';
+    : mode === 'search'
+      ? 'buscar em arquivos…'
+      : 'digite um comando…';
 }
 
 function openPalette() {
@@ -1704,6 +1764,55 @@ function openQuickOpen() {
   });
 }
 
+/** Ctrl+Shift+F: busca textual nos arquivos, atualizada enquanto digita. */
+function openSearch() {
+  setPaletteMode('search');
+  searchToken += 1;
+  searchState = { query: '', results: [], loading: false, truncated: false };
+  clearTimeout(searchTimer);
+  els.paletteinput.value = '';
+  els.palette.hidden = false;
+  els.paletteinput.focus();
+  renderPalette();
+}
+
+function scheduleSearch() {
+  const query = els.paletteinput.value.trim();
+  const token = (searchToken += 1);
+  clearTimeout(searchTimer);
+
+  if (query.length < 2) {
+    searchState = { query, results: [], loading: false, truncated: false };
+    renderPalette();
+    return;
+  }
+
+  searchState = { query, results: [], loading: true, truncated: false };
+  renderPalette();
+
+  searchTimer = setTimeout(async () => {
+    let truncated = false;
+    try {
+      const data = await apiJson(api('/api/search', { q: query }));
+      if (token !== searchToken) return;
+      searchState = {
+        query,
+        results: Array.isArray(data.files) ? data.files : [],
+        loading: false,
+        truncated: !!data.truncated,
+      };
+      truncated = searchState.truncated;
+    } catch (err) {
+      if (token !== searchToken) return;
+      searchState = { query, results: [], loading: false, truncated: false };
+      setStatus('busca falhou: ' + err.message);
+    }
+
+    if (truncated) setStatus('busca truncada: mostrando as primeiras ocorrências');
+    if (paletteMode === 'search' && !els.palette.hidden) renderPalette();
+  }, 250);
+}
+
 async function ensureFileIndex() {
   if (Array.isArray(state.fileIndex)) return;
   try {
@@ -1734,18 +1843,32 @@ function bindPalette() {
       if (ctrl && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
         event.preventDefault();
         openQuickOpen();
+        return;
+      }
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        openSearch();
       }
     },
     true,
   );
 
   els.paletteinput.addEventListener('input', () => {
-    // No Ctrl+P, digitar ">" vira paleta de comandos (como no VSCode).
-    if (paletteMode === 'files' && els.paletteinput.value.startsWith('>')) {
-      paletteMode = 'commands';
-      els.paletteinput.value = els.paletteinput.value.slice(1).trimStart();
-      els.paletteinput.placeholder = 'digite um comando…';
+    const value = els.paletteinput.value;
+
+    // Na abertura rápida ou na busca, digitar ">" vira paleta de comandos.
+    if (paletteMode !== 'commands' && value.startsWith('>')) {
+      setPaletteMode('commands');
+      els.paletteinput.value = value.slice(1).trimStart();
+      renderPalette();
+      return;
     }
+
+    if (paletteMode === 'search') {
+      scheduleSearch();
+      return;
+    }
+
     renderPalette();
   });
   els.paletteinput.addEventListener('keydown', (event) => {

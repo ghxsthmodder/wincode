@@ -151,6 +151,18 @@ O índice é montado na primeira abertura e fica em memória enquanto a pasta es
 ficam de fora `node_modules`, `.git`, `target`, `dist`, `build`, `.venv`, `__pycache__` e
 outras pastas de cache/saída, com teto de 8000 arquivos e profundidade 16.
 
+## Busca em arquivos (Ctrl+Shift+F)
+
+`Ctrl+Shift+F` abre a busca no mesmo modal, com resultados atualizados enquanto você
+digita (250 ms de espera e a partir de dois caracteres). Cada linha mostra o trecho da
+ocorrência como título e `arquivo:linha` à direita; `Enter` abre o arquivo (ou troca
+para a aba) com o cursor na posição exata.
+
+A busca é textual, sem diferenciar maiúsculas, feita em Rust sobre o mesmo índice do
+`Ctrl+P` — herda as pastas ignoradas e não exige `rg` nem `findstr` instalados. Limites
+por resposta: 200 ocorrências (20 por arquivo), arquivos até 1 MB, binários de fora e
+orçamento de 1,5 s; quando algo fica de fora, a barra de status avisa.
+
 ## Sessão por projeto
 
 Cada projeto guarda sua sessão em `wincodeconfig/sessions/<chave>.json`, com chave
@@ -257,8 +269,8 @@ digitar `>` troca para a paleta.
 
 Comandos disponíveis:
 
-- **arquivo**: abrir rapidamente (Ctrl+P), salvar, renomear e excluir o arquivo atual,
-  novo arquivo/pasta, recarregar a árvore
+- **arquivo**: abrir rapidamente (Ctrl+P), buscar em arquivos (Ctrl+Shift+F), salvar,
+  renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
 - **projeto**: abrir pasta/arquivo, mostrar/ocultar explorador, abas e terminal, focar e limpar o terminal
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
@@ -274,6 +286,7 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+W` — fecha a aba atual (pede confirmação se houver alterações)
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` — próxima/anterior, na ordem de abertura
 - `Ctrl+P` — abertura rápida de arquivos do projeto (`>` troca para a paleta)
+- `Ctrl+Shift+F` — busca textual nos arquivos do projeto (`>` troca para a paleta)
 - `Ctrl+G` — vai para uma linha
 - `Ctrl+=` / `Ctrl+-` / `Ctrl+0` — aumenta, diminui ou volta a fonte do editor ao padrão
 - `Shift+Alt+F` — formata o documento nas linguagens com formatador no Monaco
@@ -324,6 +337,8 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - No modo arquivo único, abrir outros arquivos (pelo terminal ou pelo `Ctrl+P`) cria abas
   normalmente, mas o explorador continua mostrando só o arquivo escolhido; use
   **abrir pasta…** para voltar à árvore do projeto.
+- A busca é textual e sem expressões regulares; para padrões complexos, use o terminal
+  (`findstr`/`rg`).
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
   que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.

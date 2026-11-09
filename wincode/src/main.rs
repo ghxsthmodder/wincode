@@ -10,6 +10,7 @@ mod index;
 mod jobs;
 mod protocol;
 mod recent;
+mod search;
 mod session;
 mod settings;
 
