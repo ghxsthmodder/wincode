@@ -82,9 +82,10 @@ do editor, com **abrir pasta…**, **abrir arquivo…** e os **projetos recentes
 
 Ao escolher um **arquivo**, a pasta dele vira a raiz do projeto (para o terminal), mas o
 explorador mostra **apenas o arquivo aberto** — nada de listar a pasta inteira, como no
-VSCode. Pelo mesmo motivo, nesse modo as ações de criar e o menu de contexto de pasta
-ficam ocultos; use **abrir pasta…** no menu do explorador para voltar à árvore completa.
-Já o argumento de CLI com um arquivo abre esse arquivo em uma aba e entra no mesmo modo.
+VSCode. Criar arquivos e pastas continua disponível no menu e usa a pasta do arquivo,
+mas o item novo abre como aba (a árvore segue fixa no arquivo); use **abrir pasta…** no
+menu do explorador para voltar à árvore completa. Já o argumento de CLI com um arquivo
+abre esse arquivo em uma aba e entra no mesmo modo.
 
 Também é possível definir a pasta por variável de ambiente:
 
@@ -93,8 +94,9 @@ set WINCODE_ROOT=C:\projetos\meu-app
 ```
 
 O menu **⋯** do explorador (e o clique direito no espaço vazio da árvore) concentra
-**abrir pasta…**, **abrir arquivo…** e **recarregar explorador**, além de **novo arquivo**
-e **nova pasta**. Os dois primeiros abrem o diálogo nativo do Windows (`IFileOpenDialog`
+os cinco itens: **abrir pasta…**, **abrir arquivo…**, **recarregar explorador**,
+**novo arquivo** e **nova pasta** (sem pasta escolhida, criar apenas avisa na barra de
+status). Os dois primeiros abrem o diálogo nativo do Windows (`IFileOpenDialog`
 via crate `rfd`) e trocam a raiz do projeto sem reiniciar o editor.
 
 ## Painéis
