@@ -34,10 +34,13 @@ wincode/
     monaco/vs/              # Monaco 0.57 (gerado pelo script)
   src/
     main.rs                 # janela + WebView
-    protocol.rs             # rotas /api/* e assets
+    protocol.rs             # rotas /api/*, fontes e assets
     assets.rs               # assets embutidos (override opcional em disco)
+    config.rs               # pasta portátil wincodeconfig/ ao lado do .exe
     fsapi.rs                # raiz do projeto + resolução segura de caminhos
+    fonts.rs                # fontes do usuário (lê a família do .ttf/.otf)
     jobs.rs                 # execução assíncrona dos comandos do terminal
+    recent.rs               # projetos recentes da tela inicial
     settings.rs             # preferências do editor (JSON no config do usuário)
 ```
 
@@ -73,9 +76,15 @@ wincode.exe C:\projetos\meu-app               # abre a pasta
 wincode.exe C:\projetos\meu-app\src\main.rs  # abre a pasta do arquivo e o arquivo
 ```
 
-Sem argumentos, o editor **não lista o diretório atual**: abre uma tela inicial para
-escolher uma pasta ou um arquivo. Ao escolher um arquivo, a pasta dele vira a raiz do
-projeto e o arquivo já abre em uma aba. Cancelar o diálogo mantém a tela inicial.
+Sem argumentos, o editor **não lista o diretório atual**: abre um painel inicial no lugar
+do editor, com **abrir pasta…**, **abrir arquivo…** e os **projetos recentes** (os dez
+últimos, guardados em `wincodeconfig/recent.json`). Cancelar o diálogo mantém o painel.
+
+Ao escolher um **arquivo**, a pasta dele vira a raiz do projeto (para o terminal), mas o
+explorador mostra **apenas o arquivo aberto** — nada de listar a pasta inteira, como no
+VSCode. Pelo mesmo motivo, nesse modo as ações de criar e o menu de contexto de pasta
+ficam ocultos; use **abrir pasta…** no menu do explorador para voltar à árvore completa.
+Já o argumento de CLI com um arquivo abre esse arquivo em uma aba e entra no mesmo modo.
 
 Também é possível definir a pasta por variável de ambiente:
 
@@ -83,9 +92,10 @@ Também é possível definir a pasta por variável de ambiente:
 set WINCODE_ROOT=C:\projetos\meu-app
 ```
 
-Os botões **abrir pasta** e **abrir arquivo** na barra superior abrem o diálogo nativo
-do Windows (`IFileOpenDialog` via crate `rfd`) e trocam a raiz do projeto sem reiniciar
-o editor.
+O menu **⋯** do explorador (e o clique direito no espaço vazio da árvore) concentra
+**abrir pasta…**, **abrir arquivo…** e **recarregar explorador**, além de **novo arquivo**
+e **nova pasta**. Os dois primeiros abrem o diálogo nativo do Windows (`IFileOpenDialog`
+via crate `rfd`) e trocam a raiz do projeto sem reiniciar o editor.
 
 ## Painéis
 
@@ -106,6 +116,8 @@ A cada ~2 segundos o editor confere **apenas o que está visível**: a pasta rai
 pastas expandidas e os arquivos abertos (pastas dentro de uma pasta recolhida saem da
 checagem). Quando algo muda, só a pasta afetada é relida e suas linhas são atualizadas
 no lugar — o resto da árvore, a rolagem e o que já estava carregado não são tocados.
+No modo arquivo único só o próprio arquivo entra na checagem: a pasta dele pode ser
+enorme (Downloads, Área de Trabalho) e não é lida a cada dois segundos.
 Arquivos abertos **sem alterações pendentes** são relidos do disco; abas com edições não
 salvas nunca são sobrescritas — salve ou descarte antes.
 
@@ -124,8 +136,8 @@ oferece **fechar arquivo atual**.
 
 ## Gerenciamento de arquivos e pastas
 
-No **Explorador**, use o menu **⋯** no topo do painel (com **novo arquivo** e **nova pasta**)
-ou o **clique direito** em qualquer item (ou no espaço vazio, para criar na raiz):
+No **Explorador**, use o menu **⋯** no topo do painel (abrir pasta/arquivo, recarregar,
+novo arquivo e nova pasta) ou o **clique direito** em qualquer item:
 
 - **novo arquivo** e **nova pasta** — criam dentro da pasta clicada (ou da pasta selecionada)
 - **renomear** — mantém o arquivo aberto no editor, inclusive alterações não salvas
@@ -141,13 +153,13 @@ Se o terminal estava dentro de uma pasta renomeada/excluída, ele acompanha a mu
 O botão **⚙ configurações** (ou `Ctrl+,`) abre o painel de preferências, aplicado
 ao vivo e salvo automaticamente:
 
-- **Editor (Monaco)**: tema (`vs-dark`, `vs`, alto contraste), família e tamanho da fonte,
-altura da linha, indentação (espaços ou tabulação + largura), detecção da indentação
-do arquivo, quebra de linha, números de linha, espaços em branco visíveis, estilo do
-cursor, minimapa, rolagem suave e **salvar automaticamente** (~1s após parar de digitar)
-- **Interface**: tema claro/escuro (independente do tema do editor), tamanho da fonte da
-interface, largura do explorador, altura do terminal, exibição dos ícones da árvore e
-visibilidade do explorador, das abas e do terminal
+- **Editor (Monaco)**: tema (o pacote está em [Temas](#temas)), família e tamanho da fonte,
+ligaduras, altura da linha, indentação (espaços ou tabulação + largura), detecção da
+indentação do arquivo, quebra de linha, números de linha, espaços em branco visíveis,
+estilo do cursor, minimapa, rolagem suave e **salvar automaticamente** (~1s após parar de digitar)
+- **Interface**: tema da interface (`seguir o tema do editor`, `escuro` ou `claro`), tamanho
+  da fonte da interface, largura do explorador, altura do terminal, exibição dos ícones da
+  árvore e visibilidade do explorador, das abas e do terminal
 - **Terminal**: tamanho da fonte
 - **restaurar padrões** devolve tudo ao inicial
 
@@ -161,6 +173,49 @@ configuração do usuário:
 
 Valores fora da faixa ou desconhecidos são ignorados na leitura, então editar o arquivo
 à mão não quebra a interface.
+
+## Temas
+
+Além dos quatro temas nativos do Monaco (`vs-dark`, `vs`, alto contraste escuro e claro), o
+editor traz 34 temas com as cores do código **e** da interface: Dracula, Monokai, Solarized
+Dark/Light, Nord, One Dark/Light, GitHub Dark/Light, Gruvbox Dark/Light, Tokyo Night (e Storm),
+Catppuccin Mocha/Macchiato/Frappé/Latte, Material Palenight/Ocean, Ayu Dark/Mirage/Light,
+Cobalt2, Night Owl, SynthWave '84, Shades of Purple, Rosé Pine (e Moon), Everforest, Kanagawa,
+Zenburn, Quiet Light, Horizon e Darcula.
+
+Cada tema é uma linha de dados em `THEME_SPECS`: fundo, texto, comentário, destaque, sintaxe
+principal e perigo. O realce da linha, bordas, seleção, widgets, barra de rolagem e a paleta
+da interface são derivados em `editorColors`/`uiPalette`, então incluir um tema novo é copiar
+uma linha e trocar os hexadecimais. Com **tema da interface = seguir o tema do editor**, o
+explorador, as abas, o terminal e os menus acompanham o tema; `escuro` e `claro` voltam às
+paletas fixas, independentes do editor.
+
+## Fontes
+
+A lista do painel traz Cascadia Code/Mono/Next, JetBrains Mono, Fira Code, Iosevka, Monoid,
+Hasklig, Victor Mono, IBM Plex Mono, Source Code Pro, Inconsolata, Hack, Ubuntu Mono, Roboto
+Mono, Space Mono, Geist Mono, Commit Mono, Maple Mono, Red Hat Mono, Noto Sans Mono, Anonymous
+Pro, Cousine, DejaVu/Droid Sans Mono, Consolas, Menlo e SF Mono. O campo é livre e o primeiro
+item do stack realmente instalado é o usado. **Ligaduras** transforma `=>`, `!=` e `->` em
+glifos únicos nas fontes que suportam (Fira Code, JetBrains Mono, Hasklig, Victor Mono, Iosevka…).
+
+Para usar uma fonte própria, basta jogar o `.ttf`/`.otf` em `wincodeconfig/fonts`, ao lado do
+`.exe` — ela não precisa estar instalada no Windows. O Wincode lê a família da tabela `name` do
+arquivo, registra o `@font-face` e adiciona o nome à lista. Um `.json` de mesmo nome ajusta
+rótulo, peso e estilo (ou aponta para outro arquivo):
+
+```json
+{
+  "file": "JetBrainsMonoNLNerdFont-Regular.ttf",
+  "label": "JetBrains Mono NL (local)",
+  "family": "JetBrains Mono NL",
+  "weight": "400",
+  "style": "normal"
+}
+```
+
+**fontes personalizadas → recarregar** relê a pasta sem reiniciar (abrir as configurações já
+relê). A URL leva `?v=<mtime>`, então substituir o arquivo invalida o cache do WebView.
 
 ## Paleta de comandos
 
@@ -232,6 +287,11 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 
 - A troca de pasta recomeça a sessão: arquivos abertos e modelos do Monaco são descartados
   (alterações não salvas são perdidas — salve antes de trocar).
+- No modo arquivo único, abrir outros arquivos (pelo terminal ou por `Ctrl+P` no futuro) cria
+  abas normalmente, mas o explorador continua mostrando só o arquivo escolhido; use
+  **abrir pasta…** para voltar à árvore do projeto.
+- `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
+  que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.
   Por rodarem sem janela de console, programas que dependem de um terminal real (editores
   de texto interativos, `pause`, prompts de senha) não funcionam.

@@ -9,15 +9,20 @@ pub(super) struct FsState {
     pub(super) selected: bool,
     /// Diretório de trabalho do terminal integrado.
     pub(super) cwd: PathBuf,
+    /// Quando um arquivo foi aberto sozinho (sem escolher a pasta do projeto),
+    /// o explorador mostra **apenas** ele. `root` continua sendo a pasta dele,
+    /// para o terminal e para o acesso a arquivos.
+    pub(super) open_file: Option<PathBuf>,
 }
 
 impl FsState {
-    pub(super) fn new(root: Option<PathBuf>) -> Self {
-        match root {
+    pub(super) fn new(root: Option<PathBuf>, file: Option<PathBuf>) -> Self {
+        let mut state = match root {
             Some(dir) => Self {
                 cwd: dir.clone(),
                 root: dir,
                 selected: true,
+                open_file: None,
             },
             None => {
                 let current = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
@@ -25,15 +30,72 @@ impl FsState {
                     cwd: current.clone(),
                     root: current,
                     selected: false,
+                    open_file: None,
                 }
             }
+        };
+
+        if let Some(file) = file {
+            let _ = state.set_file(file);
         }
+
+        state
     }
 
     pub(super) fn set_root(&mut self, root: PathBuf) {
         self.cwd = root.clone();
         self.root = root;
         self.selected = true;
+        self.open_file = None;
+    }
+
+    /// Abre um arquivo sozinho: a raiz passa a ser a pasta dele e o explorador
+    /// fica restrito a esse arquivo.
+    pub(super) fn set_file(&mut self, file: PathBuf) -> Result<(), String> {
+        // Sem canonicalizar: no Windows isso viraria `\\?\C:\...` e esse prefixo
+        // apareceria na árvore e na barra de status.
+        let file = std::path::absolute(&file).unwrap_or(file);
+        if !file.is_file() {
+            return Err(format!("{} não é um arquivo", file.display()));
+        }
+        let parent = file
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .ok_or("o arquivo não está em uma pasta")?
+            .to_path_buf();
+
+        self.cwd = parent.clone();
+        self.root = parent;
+        self.selected = true;
+        self.open_file = Some(file);
+        Ok(())
+    }
+
+    /// Arquivo fixado no explorador, quando a listagem pedida é a raiz.
+    pub(super) fn pinned_file_in(&self, dir: &Path) -> Option<PathBuf> {
+        let file = self.open_file.as_ref()?;
+        let root = std::fs::canonicalize(&self.root).ok()?;
+        (root == dir).then(|| file.clone())
+    }
+
+    /// Renomear o arquivo fixado mantém a referência válida.
+    pub(super) fn remap_file(&mut self, from: &Path, to: &Path) {
+        let Some(file) = &self.open_file else {
+            return;
+        };
+        if with_canonical_parent(file) == from {
+            self.open_file = Some(to.to_path_buf());
+        }
+    }
+
+    /// Excluir o arquivo fixado encerra o modo "arquivo único".
+    pub(super) fn clear_file_if_inside(&mut self, removed: &Path) {
+        let Some(file) = &self.open_file else {
+            return;
+        };
+        if with_canonical_parent(file).starts_with(removed) {
+            self.open_file = None;
+        }
     }
 
     /// Resolve um caminho vindo da interface, impedindo sair da raiz do projeto.
@@ -81,6 +143,19 @@ impl FsState {
         if self.cwd.starts_with(removed) {
             self.cwd = self.root.clone();
         }
+    }
+}
+
+/// Caminho com o **pai** canonicalizado: continua comparável depois que o item
+/// foi renomeado ou removido, quando canonicalizar o caminho inteiro falharia.
+fn with_canonical_parent(path: &Path) -> PathBuf {
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
+        return path.to_path_buf();
+    };
+
+    match std::fs::canonicalize(parent) {
+        Ok(parent) => parent.join(name),
+        Err(_) => path.to_path_buf(),
     }
 }
 

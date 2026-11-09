@@ -20,18 +20,8 @@
     --term-font-size: 12.5px;
   }
 
-  /* Tema claro da interface (o tema do Monaco é escolhido à parte). */
-  body.light {
-    --bg: #eef1f7;
-    --panel: #f7f9fc;
-    --surface: #ffffff;
-    --border: #d3d9e4;
-    --text: #1d2330;
-    --muted: #667085;
-    --accent: #2563eb;
-    --accent2: #9333ea;
-    --danger: #dc2626;
-  }
+  /* As cores da interface vêm de JS (tema do editor ou tema claro/escuro fixo).
+     A classe `light` só ajusta os realces translúcidos, que dependem do fundo. */
   body.light .row:hover,
   body.light .titlebar button:hover,
   body.light .panel-title button:hover,
@@ -138,11 +128,12 @@
   .tabfile:hover .tabclose, .tabfile.active .tabclose { opacity: .65; }
   .tabfile .tabclose:hover { opacity: 1; background: rgba(127,127,127,.22); }
   .editor { flex: 1 1 0; min-height: 0; position: relative; }
+  .editor > #editor { position: absolute; inset: 0; }
 
   .terminal {
     display: flex; flex-direction: column; flex: 0 0 var(--terminal-height);
     height: var(--terminal-height); min-height: 0;
-    border-top: 1px solid var(--border); background: #0a0c11;
+    border-top: 1px solid var(--border); background: var(--bg);
   }
   .terminal-head {
     display: flex; align-items: center; gap: 10px; padding: 4px 12px;
@@ -277,16 +268,60 @@
   body.light .palette-item.active { background: rgba(37,99,235,.14); }
   .palette-empty { padding: 12px; text-align: center; }
 
-  .welcome { z-index: 80; }
-  .welcome-box { padding: 24px; text-align: center; }
-  .welcome-box h2 { margin: 0 0 8px; font-size: 20px; }
-  .welcome-box p { margin: 0; color: var(--muted); }
-  .welcome-actions { display: flex; justify-content: center; gap: 10px; margin-top: 18px; }
-  .welcome-actions button {
-    padding: 8px 14px; background: transparent; border: 1px solid var(--border);
-    border-radius: 5px; color: var(--text); font: inherit; cursor: pointer;
+  /* Painel inicial no lugar do editor, como a aba Welcome do VSCode. */
+  .welcome {
+    position: absolute; inset: 0; z-index: 10; overflow: auto;
+    background: var(--surface); display: flex; justify-content: center;
+    padding: 40px 24px;
   }
-  .welcome-actions button:hover { background: rgba(255,255,255,.06); }
+  .welcome[hidden] { display: none; }
+  .welcome-inner { width: min(760px, 100%); }
+  .welcome h1 {
+    margin: 0; font-size: 26px; font-weight: 600; letter-spacing: .02em;
+    color: var(--accent2);
+  }
+  .welcome-sub { margin: 6px 0 26px; max-width: 60ch; color: var(--muted); line-height: 1.5; }
+  .welcome-grid {
+    display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.4fr);
+    gap: 28px; align-items: start;
+  }
+  .welcome h2 {
+    margin: 0 0 8px; font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .1em; color: var(--muted);
+  }
+  .welcome-action {
+    display: flex; align-items: center; gap: 10px; width: 100%;
+    padding: 8px 12px; background: transparent; border: 1px solid var(--border);
+    border-radius: 6px; color: var(--text); font: inherit; cursor: pointer;
+    text-align: left;
+  }
+  .welcome-action + .welcome-action { margin-top: 8px; }
+  .welcome-action:hover { background: rgba(127,127,127,.12); border-color: var(--accent); }
+  .welcome-action .welcome-icon { font-size: 14px; line-height: 1; }
+  .recentlist { display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow: auto; }
+  .recent-row {
+    display: flex; align-items: center; gap: 8px; padding: 5px 8px;
+    border: 1px solid transparent; border-radius: 5px; cursor: pointer; min-width: 0;
+  }
+  .recent-row:hover { background: rgba(127,127,127,.1); border-color: var(--border); }
+  .recent-row img { width: 15px; height: 15px; flex: 0 0 auto; }
+  .recent-row .recent-text { min-width: 0; flex: 1; }
+  .recent-row .recent-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .recent-row .recent-path {
+    display: block; font-size: 11px; color: var(--muted);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .recent-row .recent-forget {
+    border: none; background: transparent; color: var(--muted); cursor: pointer;
+    font: inherit; font-size: 14px; line-height: 1; padding: 2px 5px; border-radius: 3px;
+    opacity: 0;
+  }
+  .recent-row:hover .recent-forget { opacity: .8; }
+  .recent-row .recent-forget:hover { background: rgba(127,127,127,.22); color: var(--text); }
+  .welcome-hints { margin-top: 28px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 11px; }
+  @media (max-width: 700px) {
+    .welcome-grid { grid-template-columns: 1fr; }
+  }
   .settings h3 {
     margin: 14px 0 2px; font-size: 10px; text-transform: uppercase;
     letter-spacing: .1em; color: var(--muted);
@@ -304,6 +339,11 @@
   }
   .setting select:focus, .setting input:focus { outline: none; border-color: var(--accent); }
   .setting input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--accent); }
+  .setting button {
+    flex: 0 0 auto; padding: 4px 10px; background: transparent; border: 1px solid var(--border);
+    border-radius: 4px; color: var(--text); font: inherit; cursor: pointer;
+  }
+  .setting button:hover { background: rgba(127,127,127,.14); border-color: var(--accent); }
   .pad { padding: 8px 12px; }
   .error { color: var(--danger); white-space: pre-wrap; }
 </style>
@@ -313,9 +353,6 @@
     <header class="titlebar">
       <span class="brand">Wincode</span>
       <span id="rootlabel" class="rootlabel">carregando…</span>
-      <button id="btnopenfolder" title="Abrir outra pasta">abrir pasta</button>
-      <button id="btnopenfile" title="Abrir arquivo">abrir arquivo</button>
-      <button id="btnrefresh" title="Recarregar a árvore de arquivos">recarregar</button>
       <button id="btntogglesidebar" title="Mostrar/ocultar explorador (Ctrl+B)">explorador</button>
       <button id="btntoggleterminal" title="Mostrar/ocultar terminal (Ctrl+J)">terminal</button>
       <button id="btnsettings" title="Configurações (Ctrl+,)">⚙ configurações</button>
@@ -326,7 +363,7 @@
         <div class="panel-title">
           <span>Explorador</span>
           <span class="spacer"></span>
-          <button id="btnnewmenu" type="button" title="Novo arquivo ou pasta">⋯</button>
+          <button id="btnnewmenu" type="button" title="Abrir pasta/arquivo, recarregar ou criar">⋯</button>
         </div>
         <div id="tree" class="tree"><div class="dim pad">carregando…</div></div>
       </aside>
@@ -336,7 +373,37 @@
         <div class="editor-head">
           <div id="tabs" class="tabs" hidden></div>
         </div>
-        <div id="editor" class="editor"></div>
+        <div class="editor">
+          <div id="editor"></div>
+
+          <div id="welcome" class="welcome" hidden>
+            <div class="welcome-inner">
+              <h1>Wincode</h1>
+              <p class="welcome-sub">
+                Abra uma pasta de projeto para navegar na árvore ou escolha um arquivo
+                para editar sozinho. Também dá para voltar a um projeto aberto recentemente.
+              </p>
+              <div class="welcome-grid">
+                <section>
+                  <h2>início</h2>
+                  <button id="welcomefolder" type="button" class="welcome-action">
+                    <span class="welcome-icon">📂</span> abrir pasta…
+                  </button>
+                  <button id="welcomefile" type="button" class="welcome-action">
+                    <span class="welcome-icon">📄</span> abrir arquivo…
+                  </button>
+                </section>
+                <section>
+                  <h2>projetos recentes</h2>
+                  <div id="recentlist" class="recentlist"><div class="dim pad">nenhum projeto aberto ainda</div></div>
+                </section>
+              </div>
+              <div class="welcome-hints dim">
+                Ctrl+Shift+P paleta de comandos · Ctrl+, configurações · Ctrl+B explorador · Ctrl+J terminal
+              </div>
+            </div>
+          </div>
+        </div>
         <div class="resize-handle vert" id="terminal-resize" title="Arraste para redimensionar o terminal"></div>
 
         <section class="terminal">
@@ -364,17 +431,6 @@
     </footer>
   </div>
 
-  <div id="welcome" class="overlay welcome" hidden>
-    <div class="dialog welcome-box">
-      <h2>Wincode</h2>
-      <p>Escolha uma pasta de projeto ou um arquivo para começar.</p>
-      <div class="welcome-actions">
-        <button id="welcomefolder" type="button" class="primary">abrir pasta…</button>
-        <button id="welcomefile" type="button">abrir arquivo…</button>
-      </div>
-    </div>
-  </div>
-
   <div id="settings" class="overlay" hidden>
     <div class="dialog settings">
       <h2>Configurações</h2>
@@ -382,26 +438,25 @@
         <h3>Editor (Monaco)</h3>
 
         <label class="setting">
-          <span class="label">tema</span>
-          <select id="set-theme">
-            <option value="vs-dark">escuro (vs-dark)</option>
-            <option value="vs">claro (vs)</option>
-            <option value="hc-black">alto contraste escuro</option>
-            <option value="hc-light">alto contraste claro</option>
-          </select>
+          <span class="label">tema<small>também colore a interface quando ela segue o tema</small></span>
+          <select id="set-theme"></select>
         </label>
 
         <label class="setting">
           <span class="label">fonte<small>família; a primeira disponível é usada</small></span>
           <input id="set-fontfamily" type="text" list="fontoptions" spellcheck="false">
         </label>
-        <datalist id="fontoptions">
-          <option value="&quot;Cascadia Code&quot;, &quot;JetBrains Mono&quot;, Consolas, monospace"></option>
-          <option value="&quot;Fira Code&quot;, Consolas, monospace"></option>
-          <option value="&quot;JetBrains Mono&quot;, monospace"></option>
-          <option value="Consolas, &quot;Courier New&quot;, monospace"></option>
-          <option value="ui-monospace, monospace"></option>
-        </datalist>
+        <datalist id="fontoptions"></datalist>
+
+        <label class="setting">
+          <span class="label">ligaduras<small>“=&gt;”, “!=”, “-&gt;” como glifos únicos</small></span>
+          <input id="set-ligatures" type="checkbox">
+        </label>
+
+        <div class="setting">
+          <span class="label">fontes personalizadas<small id="fontstatus">carregando…</small></span>
+          <button id="reloadfonts" type="button" title="Relê a pasta de fontes">recarregar</button>
+        </div>
 
         <label class="setting">
           <span class="label">tamanho da fonte</span>
@@ -486,8 +541,9 @@
         <h3>Interface</h3>
 
         <label class="setting">
-          <span class="label">tema da interface<small>independente do tema do editor</small></span>
+          <span class="label">tema da interface<small>“seguir o tema” usa as cores do tema do editor</small></span>
           <select id="set-apptheme">
+            <option value="auto">seguir o tema do editor</option>
             <option value="dark">escuro</option>
             <option value="light">claro</option>
           </select>
@@ -562,6 +618,7 @@ const els = {
   inputline: $('inputline'),
   cmdinput: $('cmdinput'),
   welcome: $('welcome'),
+  recentlist: $('recentlist'),
   sidebar: $('sidebar'),
   panels: document.querySelector('.panels'),
   main: document.querySelector('.main'),
@@ -577,6 +634,10 @@ const els = {
 const state = {
   root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false,
   history: [], historyIndex: 0, historyDraft: '', selectionRequired: false,
+  // Caminho do arquivo aberto sozinho: o explorador mostra só ele.
+  singleFile: '',
+  recent: [],
+  fontsDir: '',
 };
 const models = new Map();
 let view = null;
@@ -663,9 +724,338 @@ const isAbsolutePath = (path) => /^(?:[a-zA-Z]:[\\/]|[\\/])/.test(path);
 const resolvePath = (path) => {
   const value = String(path || '').trim();
   if (isAbsolutePath(value)) return value;
-  const base = state.cwd.replace(/[\\/]+$/, '');
-  return `${base}/${value.replace(/^\.\//, '')}`;
+  const base = String(state.cwd || '').replace(/[\\/]+$/, '');
+  const relative = value.replace(/^\.\//, '');
+  // Sem projeto aberto o caminho fica como veio; o backend recusa com erro claro.
+  return base ? `${base}/${relative}` : relative;
 };
+
+// ---------------------------------------------------------------------------
+// Temas do editor e fontes
+// ---------------------------------------------------------------------------
+const hexToRgb = (hex) => {
+  const value = String(hex).replace('#', '');
+  const full = value.length === 3 ? value.split('').map((part) => part + part).join('') : value;
+  return [0, 2, 4].map((index) => Number.parseInt(full.slice(index, index + 2), 16));
+};
+const rgbToHex = (channels) => '#' + channels
+  .map((value) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0'))
+  .join('');
+const mix = (from, to, amount) => {
+  const a = hexToRgb(from);
+  const b = hexToRgb(to);
+  return rgbToHex(a.map((value, index) => value + (b[index] - value) * amount));
+};
+const rgba = (hex, alpha) => {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+};
+// Formato que o Monaco espera em `rules[].foreground` (sem `#`).
+const bare = (hex) => String(hex).replace('#', '').toUpperCase();
+
+/**
+ * Só os dados essenciais de cada tema: fundo, texto, comentário, destaque e a
+ * sintaxe principal. O resto (realce da linha, bordas, seleção, barras) é
+ * derivado em `editorColors`, e a interface usa a paleta em `uiPalette`.
+ */
+const THEME_SPECS = [
+  { id: 'vs-dark', label: 'escuro (vs-dark)', base: 'vs-dark', builtin: true, bg: '#1e1e1e', fg: '#d4d4d4', muted: '#6a9955', accent: '#007acc', accent2: '#c586c0', keyword: '#569cd6', string: '#ce9178', number: '#b5cea8', func: '#dcdcaa', type: '#4ec9b0', variable: '#9cdcfe', danger: '#f44747' },
+  { id: 'vs', label: 'claro (vs)', base: 'vs', builtin: true, bg: '#ffffff', fg: '#000000', muted: '#008000', accent: '#0000ff', accent2: '#af00db', keyword: '#0000ff', string: '#a31515', number: '#098658', func: '#795e26', type: '#267f99', variable: '#001080', danger: '#cd3131' },
+  { id: 'hc-black', label: 'alto contraste escuro', base: 'hc-black', builtin: true, bg: '#000000', fg: '#ffffff', muted: '#7ca668', accent: '#1aebff', accent2: '#d670d6', keyword: '#569cd6', string: '#ce9178', number: '#b5cea8', func: '#dcdcaa', type: '#4ec9b0', variable: '#9cdcfe', danger: '#f44747' },
+  { id: 'hc-light', label: 'alto contraste claro', base: 'hc-light', builtin: true, bg: '#ffffff', fg: '#000000', muted: '#515151', accent: '#0f4a85', accent2: '#702670', keyword: '#0f4a85', string: '#a31515', number: '#098658', func: '#795e26', type: '#267f99', variable: '#001080', danger: '#cd3131' },
+
+  { id: 'dracula', label: 'Dracula', base: 'vs-dark', bg: '#282a36', fg: '#f8f8f2', muted: '#6272a4', accent: '#bd93f9', accent2: '#ff79c6', keyword: '#ff79c6', string: '#f1fa8c', number: '#bd93f9', func: '#50fa7b', type: '#8be9fd', variable: '#f8f8f2', danger: '#ff5555' },
+  { id: 'monokai', label: 'Monokai', base: 'vs-dark', bg: '#272822', fg: '#f8f8f2', muted: '#75715e', accent: '#a6e22e', accent2: '#f92672', keyword: '#f92672', string: '#e6db74', number: '#ae81ff', func: '#a6e22e', type: '#66d9ef', variable: '#fd971f', danger: '#f92672' },
+  { id: 'solarized-dark', label: 'Solarized Dark', base: 'vs-dark', bg: '#002b36', fg: '#839496', muted: '#586e75', accent: '#268bd2', accent2: '#d33682', keyword: '#859900', string: '#2aa198', number: '#d33682', func: '#268bd2', type: '#b58900', variable: '#cb4b16', danger: '#dc322f' },
+  { id: 'solarized-light', label: 'Solarized Light', base: 'vs', bg: '#fdf6e3', fg: '#657b83', muted: '#93a1a1', accent: '#268bd2', accent2: '#d33682', keyword: '#859900', string: '#2aa198', number: '#d33682', func: '#268bd2', type: '#b58900', variable: '#cb4b16', danger: '#dc322f' },
+  { id: 'nord', label: 'Nord', base: 'vs-dark', bg: '#2e3440', fg: '#d8dee9', muted: '#616e88', accent: '#88c0d0', accent2: '#b48ead', keyword: '#81a1c1', string: '#a3be8c', number: '#b48ead', func: '#88c0d0', type: '#8fbcbb', variable: '#d8dee9', danger: '#bf616a' },
+  { id: 'one-dark', label: 'One Dark Pro', base: 'vs-dark', bg: '#282c34', fg: '#abb2bf', muted: '#5c6370', accent: '#61afef', accent2: '#c678dd', keyword: '#c678dd', string: '#98c379', number: '#d19a66', func: '#61afef', type: '#e5c07b', variable: '#e06c75', danger: '#e06c75' },
+  { id: 'one-light', label: 'One Light', base: 'vs', bg: '#fafafa', fg: '#383a42', muted: '#a0a1a7', accent: '#4078f2', accent2: '#a626a4', keyword: '#a626a4', string: '#50a14f', number: '#986801', func: '#4078f2', type: '#c18401', variable: '#e45649', danger: '#e45649' },
+  { id: 'github-dark', label: 'GitHub Dark', base: 'vs-dark', bg: '#0d1117', fg: '#c9d1d9', muted: '#8b949e', accent: '#58a6ff', accent2: '#d2a8ff', keyword: '#ff7b72', string: '#a5d6ff', number: '#79c0ff', func: '#d2a8ff', type: '#ffa657', variable: '#c9d1d9', danger: '#f85149' },
+  { id: 'github-light', label: 'GitHub Light', base: 'vs', bg: '#ffffff', fg: '#24292f', muted: '#6e7781', accent: '#0969da', accent2: '#8250df', keyword: '#cf222e', string: '#0a3069', number: '#0550ae', func: '#8250df', type: '#953800', variable: '#24292f', danger: '#cf222e' },
+  { id: 'gruvbox-dark', label: 'Gruvbox Dark', base: 'vs-dark', bg: '#282828', fg: '#ebdbb2', muted: '#928374', accent: '#fabd2f', accent2: '#d3869b', keyword: '#fb4934', string: '#b8bb26', number: '#d3869b', func: '#fabd2f', type: '#83a598', variable: '#83a598', danger: '#fb4934' },
+  { id: 'gruvbox-light', label: 'Gruvbox Light', base: 'vs', bg: '#fbf1c7', fg: '#3c3836', muted: '#928374', accent: '#b57614', accent2: '#8f3f71', keyword: '#9d0006', string: '#79740e', number: '#8f3f71', func: '#b57614', type: '#076678', variable: '#427b58', danger: '#9d0006' },
+  { id: 'tokyo-night', label: 'Tokyo Night', base: 'vs-dark', bg: '#1a1b26', fg: '#a9b1d6', muted: '#565f89', accent: '#7aa2f7', accent2: '#bb9af7', keyword: '#bb9af7', string: '#9ece6a', number: '#ff9e64', func: '#7aa2f7', type: '#2ac3de', variable: '#c0caf5', danger: '#f7768e' },
+  { id: 'tokyo-night-storm', label: 'Tokyo Night Storm', base: 'vs-dark', bg: '#24283b', fg: '#a9b1d6', muted: '#565f89', accent: '#7aa2f7', accent2: '#bb9af7', keyword: '#bb9af7', string: '#9ece6a', number: '#ff9e64', func: '#7aa2f7', type: '#2ac3de', variable: '#c0caf5', danger: '#f7768e' },
+  { id: 'catppuccin-mocha', label: 'Catppuccin Mocha', base: 'vs-dark', bg: '#1e1e2e', fg: '#cdd6f4', muted: '#6c7086', accent: '#89b4fa', accent2: '#f5c2e7', keyword: '#cba6f7', string: '#a6e3a1', number: '#fab387', func: '#89b4fa', type: '#f9e2af', variable: '#f5e0dc', danger: '#f38ba8' },
+  { id: 'catppuccin-macchiato', label: 'Catppuccin Macchiato', base: 'vs-dark', bg: '#24273a', fg: '#cad3f5', muted: '#6e738d', accent: '#8aadf4', accent2: '#f5bde6', keyword: '#c6a0f6', string: '#a6da95', number: '#f5a97f', func: '#8aadf4', type: '#eed49f', variable: '#f4dbd6', danger: '#ed8796' },
+  { id: 'catppuccin-frappe', label: 'Catppuccin Frappé', base: 'vs-dark', bg: '#303446', fg: '#c6d0f5', muted: '#737994', accent: '#8caaee', accent2: '#f4b8e4', keyword: '#ca9ee6', string: '#a6d189', number: '#ef9f76', func: '#8caaee', type: '#e5c890', variable: '#f2d5cf', danger: '#e78284' },
+  { id: 'catppuccin-latte', label: 'Catppuccin Latte', base: 'vs', bg: '#eff1f5', fg: '#4c4f69', muted: '#9ca0b0', accent: '#1e66f5', accent2: '#ea76cb', keyword: '#8839ef', string: '#40a02b', number: '#fe640b', func: '#1e66f5', type: '#df8e1d', variable: '#dc8a78', danger: '#d20f39' },
+  { id: 'material-palenight', label: 'Material Palenight', base: 'vs-dark', bg: '#292d3e', fg: '#a6accd', muted: '#676e95', accent: '#82aaff', accent2: '#c792ea', keyword: '#c792ea', string: '#c3e88d', number: '#f78c6c', func: '#82aaff', type: '#ffcb6b', variable: '#f07178', danger: '#f07178' },
+  { id: 'material-ocean', label: 'Material Ocean', base: 'vs-dark', bg: '#0f111a', fg: '#8f93a2', muted: '#464b5d', accent: '#82aaff', accent2: '#c792ea', keyword: '#c792ea', string: '#c3e88d', number: '#f78c6c', func: '#82aaff', type: '#ffcb6b', variable: '#f07178', danger: '#f07178' },
+  { id: 'ayu-dark', label: 'Ayu Dark', base: 'vs-dark', bg: '#0b0e14', fg: '#bfbdb6', muted: '#565b66', accent: '#ffb454', accent2: '#59c2ff', keyword: '#ff8f40', string: '#aad94c', number: '#d2a6ff', func: '#ffb454', type: '#59c2ff', variable: '#bfbdb6', danger: '#f07178' },
+  { id: 'ayu-mirage', label: 'Ayu Mirage', base: 'vs-dark', bg: '#1f2430', fg: '#cbccc6', muted: '#5c6773', accent: '#ffcc66', accent2: '#73d0ff', keyword: '#ffa759', string: '#bae67e', number: '#d4bfff', func: '#ffcc66', type: '#73d0ff', variable: '#cbccc6', danger: '#f28779' },
+  { id: 'ayu-light', label: 'Ayu Light', base: 'vs', bg: '#fafafa', fg: '#5c6166', muted: '#8a9199', accent: '#399ee6', accent2: '#a37acc', keyword: '#fa8d3e', string: '#86b300', number: '#a37acc', func: '#f2ae49', type: '#22a4e6', variable: '#5c6166', danger: '#f07178' },
+  { id: 'cobalt2', label: 'Cobalt2', base: 'vs-dark', bg: '#193549', fg: '#ffffff', muted: '#0088ff', accent: '#ffc600', accent2: '#ff628c', keyword: '#ff9d00', string: '#3ad900', number: '#ff628c', func: '#ffc600', type: '#9effff', variable: '#ffffff', danger: '#ff628c' },
+  { id: 'night-owl', label: 'Night Owl', base: 'vs-dark', bg: '#011627', fg: '#d6deeb', muted: '#637777', accent: '#82aaff', accent2: '#c792ea', keyword: '#c792ea', string: '#ecc48d', number: '#f78c6c', func: '#82aaff', type: '#ffcb8b', variable: '#d6deeb', danger: '#ef5350' },
+  { id: 'synthwave-84', label: "SynthWave '84", base: 'vs-dark', bg: '#262335', fg: '#ffffff', muted: '#848bbd', accent: '#36f9f6', accent2: '#f92aad', keyword: '#f92aad', string: '#ff8b39', number: '#f97e72', func: '#36f9f6', type: '#fede5d', variable: '#fe4450', danger: '#fe4450' },
+  { id: 'shades-of-purple', label: 'Shades of Purple', base: 'vs-dark', bg: '#2d2b55', fg: '#e3dfff', muted: '#a599e9', accent: '#ffcc66', accent2: '#ff628c', keyword: '#ff9d00', string: '#a5ff90', number: '#ff628c', func: '#ffcc66', type: '#9effff', variable: '#e3dfff', danger: '#ff628c' },
+  { id: 'rose-pine', label: 'Rosé Pine', base: 'vs-dark', bg: '#191724', fg: '#e0def4', muted: '#6e6a86', accent: '#9ccfd8', accent2: '#ebbcba', keyword: '#c4a7e7', string: '#f6c177', number: '#ebbcba', func: '#9ccfd8', type: '#31748f', variable: '#e0def4', danger: '#eb6f92' },
+  { id: 'rose-pine-moon', label: 'Rosé Pine Moon', base: 'vs-dark', bg: '#232136', fg: '#e0def4', muted: '#6e6a86', accent: '#9ccfd8', accent2: '#ea9a97', keyword: '#c4a7e7', string: '#f6c177', number: '#ea9a97', func: '#9ccfd8', type: '#3e8fb0', variable: '#e0def4', danger: '#eb6f92' },
+  { id: 'everforest-dark', label: 'Everforest Dark', base: 'vs-dark', bg: '#2d353b', fg: '#d3c6aa', muted: '#859289', accent: '#a7c080', accent2: '#d699b6', keyword: '#e67e80', string: '#a7c080', number: '#d699b6', func: '#a7c080', type: '#dbbc7f', variable: '#d3c6aa', danger: '#e67e80' },
+  { id: 'kanagawa', label: 'Kanagawa', base: 'vs-dark', bg: '#1f1f28', fg: '#dcd7ba', muted: '#727169', accent: '#7e9cd8', accent2: '#957fb8', keyword: '#957fb8', string: '#98bb6c', number: '#d27e99', func: '#7e9cd8', type: '#7fb4ca', variable: '#dcd7ba', danger: '#e46876' },
+  { id: 'zenburn', label: 'Zenburn', base: 'vs-dark', bg: '#3f3f3f', fg: '#dcdccc', muted: '#7f9f7f', accent: '#f0dfaf', accent2: '#dfaf8f', keyword: '#f0dfaf', string: '#cc9393', number: '#8cd0d3', func: '#efefef', type: '#dfdfbf', variable: '#dcdccc', danger: '#dca3a3' },
+  { id: 'quiet-light', label: 'Quiet Light', base: 'vs', bg: '#f5f5f5', fg: '#333333', muted: '#aaaaaa', accent: '#4b83cd', accent2: '#7a3e9d', keyword: '#7a3e9d', string: '#448c27', number: '#aa3731', func: '#7a3e9d', type: '#4b83cd', variable: '#333333', danger: '#aa3731' },
+  { id: 'horizon', label: 'Horizon', base: 'vs-dark', bg: '#1c1e26', fg: '#d5d8da', muted: '#6c6f93', accent: '#e95678', accent2: '#fab795', keyword: '#e95678', string: '#29d398', number: '#fab795', func: '#25b0bc', type: '#f09483', variable: '#d5d8da', danger: '#e95678' },
+  { id: 'darcula', label: 'Darcula', base: 'vs-dark', bg: '#2b2b2b', fg: '#a9b7c6', muted: '#808080', accent: '#cc7832', accent2: '#9876aa', keyword: '#cc7832', string: '#6a8759', number: '#6897bb', func: '#ffc66d', type: '#4ec9b0', variable: '#a9b7c6', danger: '#ff6b68' },
+];
+
+/** Cores da interface derivadas do fundo/texto do tema. */
+function uiPalette(theme) {
+  const light = theme.base === 'vs' || theme.base === 'hc-light';
+  const shade = (amount) => mix(theme.bg, '#000000', amount);
+  return {
+    bg: shade(light ? 0.07 : 0.45),
+    panel: shade(light ? 0.03 : 0.2),
+    surface: theme.bg,
+    border: light ? mix(theme.bg, '#000000', 0.16) : mix(theme.bg, '#ffffff', 0.12),
+    text: theme.fg,
+    muted: theme.muted,
+    accent: theme.accent,
+    accent2: theme.accent2,
+    danger: theme.danger || (light ? '#cd3131' : '#f38ba8'),
+  };
+}
+
+const THEMES = THEME_SPECS.map((theme) => ({ ...theme, ui: uiPalette(theme) }));
+const THEME_BY_ID = new Map(THEMES.map((theme) => [theme.id, theme]));
+
+/** Paletas fixas usadas quando a interface não segue o tema do editor. */
+const DARK_UI = uiPalette({ base: 'vs-dark', bg: '#171a23', fg: '#cdd6f4', muted: '#6c7086', accent: '#89b4fa', accent2: '#f5c2e7', danger: '#f38ba8' });
+const LIGHT_UI = uiPalette({ base: 'vs', bg: '#ffffff', fg: '#1d2330', muted: '#667085', accent: '#2563eb', accent2: '#9333ea', danger: '#dc2626' });
+
+function editorColors(theme) {
+  return {
+    'editor.background': theme.bg,
+    'editor.foreground': theme.fg,
+    'editor.lineHighlightBackground': mix(theme.bg, theme.fg, 0.055),
+    'editor.selectionBackground': rgba(theme.accent, 0.28),
+    'editor.inactiveSelectionBackground': rgba(theme.accent, 0.14),
+    'editorCursor.foreground': theme.accent,
+    'editorLineNumber.foreground': mix(theme.bg, theme.muted, 0.55),
+    'editorLineNumber.activeForeground': theme.fg,
+    'editorIndentGuide.background1': mix(theme.bg, theme.fg, 0.1),
+    'editorIndentGuide.activeBackground1': mix(theme.bg, theme.accent, 0.5),
+    'editorWhitespace.foreground': rgba(theme.fg, 0.22),
+    'editorGutter.background': theme.bg,
+    'editorWidget.background': mix(theme.bg, theme.fg, 0.06),
+    'editorWidget.border': mix(theme.bg, theme.fg, 0.18),
+    'editorSuggestWidget.background': mix(theme.bg, theme.fg, 0.06),
+    'editorSuggestWidget.border': mix(theme.bg, theme.fg, 0.18),
+    'editorSuggestWidget.selectedBackground': rgba(theme.accent, 0.22),
+    'editorHoverWidget.background': mix(theme.bg, theme.fg, 0.06),
+    'editorHoverWidget.border': mix(theme.bg, theme.fg, 0.18),
+    'editorBracketMatch.background': rgba(theme.accent, 0.18),
+    'editorBracketMatch.border': theme.accent,
+    'editor.findMatchBackground': rgba(theme.accent2, 0.35),
+    'editor.findMatchHighlightBackground': rgba(theme.accent2, 0.18),
+    'scrollbarSlider.background': rgba(theme.fg, 0.14),
+    'scrollbarSlider.hoverBackground': rgba(theme.fg, 0.24),
+    'scrollbarSlider.activeBackground': rgba(theme.fg, 0.32),
+    'minimap.background': theme.bg,
+  };
+}
+
+function defineThemes() {
+  if (!window.monaco) return;
+  for (const theme of THEMES) {
+    // Os quatro temas nativos do Monaco já existem no pacote.
+    if (theme.builtin) continue;
+    window.monaco.editor.defineTheme(theme.id, {
+      base: theme.base,
+      inherit: true,
+      rules: [
+        { token: '', foreground: bare(theme.fg) },
+        { token: 'comment', foreground: bare(theme.muted), fontStyle: 'italic' },
+        { token: 'keyword', foreground: bare(theme.keyword) },
+        { token: 'string', foreground: bare(theme.string) },
+        { token: 'string.escape', foreground: bare(theme.accent2) },
+        { token: 'number', foreground: bare(theme.number) },
+        { token: 'regexp', foreground: bare(theme.string) },
+        { token: 'operator', foreground: bare(theme.accent) },
+        { token: 'delimiter', foreground: bare(theme.fg) },
+        { token: 'type', foreground: bare(theme.type) },
+        { token: 'type.identifier', foreground: bare(theme.type) },
+        { token: 'namespace', foreground: bare(theme.type) },
+        { token: 'class', foreground: bare(theme.type) },
+        { token: 'function', foreground: bare(theme.func) },
+        { token: 'variable', foreground: bare(theme.variable) },
+        { token: 'variable.predefined', foreground: bare(theme.number) },
+        { token: 'constant', foreground: bare(theme.number) },
+        { token: 'identifier', foreground: bare(theme.variable) },
+        { token: 'tag', foreground: bare(theme.keyword) },
+        { token: 'attribute.name', foreground: bare(theme.func) },
+        { token: 'attribute.value', foreground: bare(theme.string) },
+        { token: 'metatag', foreground: bare(theme.accent2) },
+        { token: 'invalid', foreground: bare(theme.danger) },
+      ],
+      colors: editorColors(theme),
+    });
+  }
+}
+
+/** Aplica as cores do tema na interface (o Monaco tem o seu próprio tema). */
+function applyUiTheme() {
+  const theme = THEME_BY_ID.get(settings.theme) || THEMES[0];
+  const palette = settings.appTheme === 'dark'
+    ? DARK_UI
+    : settings.appTheme === 'light'
+      ? LIGHT_UI
+      : theme.ui;
+  const light = settings.appTheme === 'dark'
+    ? false
+    : settings.appTheme === 'light'
+      ? true
+      : theme.base === 'vs' || theme.base === 'hc-light';
+
+  document.body.classList.toggle('light', light);
+  const root = document.documentElement.style;
+  for (const [name, value] of Object.entries(palette)) root.setProperty(`--${name}`, value);
+}
+
+function buildThemeOptions() {
+  const select = $('set-theme');
+  if (!select) return;
+
+  const groups = new Map();
+  for (const theme of THEMES) {
+    const group = theme.builtin
+      ? 'nativos do Monaco'
+      : theme.base === 'vs' || theme.base === 'hc-light'
+        ? 'claros'
+        : 'escuros';
+    if (!groups.has(group)) groups.set(group, []);
+    groups.get(group).push(theme);
+  }
+
+  select.replaceChildren();
+  for (const [label, themes] of groups) {
+    const optgroup = document.createElement('optgroup');
+    optgroup.label = label;
+    for (const theme of themes) {
+      const option = document.createElement('option');
+      option.value = theme.id;
+      option.textContent = theme.label;
+      optgroup.append(option);
+    }
+    select.append(optgroup);
+  }
+}
+
+/** Fontes de código conhecidas: o valor é o stack CSS, o rótulo é o nome. */
+const FONT_PRESETS = [
+  { label: 'Cascadia Code', stack: '"Cascadia Code", "Cascadia Mono", Consolas, monospace' },
+  { label: 'Cascadia Mono', stack: '"Cascadia Mono", Consolas, monospace' },
+  { label: 'Cascadia Next', stack: '"Cascadia Next", "Cascadia Code", Consolas, monospace' },
+  { label: 'JetBrains Mono', stack: '"JetBrains Mono", Consolas, monospace' },
+  { label: 'Fira Code', stack: '"Fira Code", Consolas, monospace' },
+  { label: 'Iosevka', stack: 'Iosevka, "Iosevka Fixed", monospace' },
+  { label: 'Monoid', stack: 'Monoid, monospace' },
+  { label: 'Hasklig', stack: 'Hasklig, monospace' },
+  { label: 'Victor Mono', stack: '"Victor Mono", monospace' },
+  { label: 'IBM Plex Mono', stack: '"IBM Plex Mono", monospace' },
+  { label: 'Source Code Pro', stack: '"Source Code Pro", monospace' },
+  { label: 'Inconsolata', stack: 'Inconsolata, monospace' },
+  { label: 'Hack', stack: 'Hack, monospace' },
+  { label: 'Ubuntu Mono', stack: '"Ubuntu Mono", monospace' },
+  { label: 'Roboto Mono', stack: '"Roboto Mono", monospace' },
+  { label: 'Space Mono', stack: '"Space Mono", monospace' },
+  { label: 'Geist Mono', stack: '"Geist Mono", monospace' },
+  { label: 'Commit Mono', stack: '"Commit Mono", monospace' },
+  { label: 'Maple Mono', stack: '"Maple Mono", monospace' },
+  { label: 'Red Hat Mono', stack: '"Red Hat Mono", monospace' },
+  { label: 'Noto Sans Mono', stack: '"Noto Sans Mono", monospace' },
+  { label: 'Anonymous Pro', stack: '"Anonymous Pro", monospace' },
+  { label: 'Cousine', stack: 'Cousine, monospace' },
+  { label: 'DejaVu Sans Mono', stack: '"DejaVu Sans Mono", monospace' },
+  { label: 'Droid Sans Mono', stack: '"Droid Sans Mono", monospace' },
+  { label: 'Consolas', stack: 'Consolas, "Courier New", monospace' },
+  { label: 'Menlo', stack: 'Menlo, Monaco, monospace' },
+  { label: 'SF Mono', stack: '"SF Mono", monospace' },
+];
+
+let userFonts = [];
+
+function buildFontOptions() {
+  const list = $('fontoptions');
+  if (!list) return;
+
+  list.replaceChildren();
+  const seen = new Set();
+  const add = (label, stack) => {
+    const key = stack.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    const option = document.createElement('option');
+    option.value = stack;
+    option.label = label;
+    option.textContent = label;
+    list.append(option);
+  };
+
+  for (const preset of FONT_PRESETS) add(preset.label, preset.stack);
+  for (const font of userFonts) add(font.label, `"${font.family}", monospace`);
+}
+
+/** Registra um `@font-face` para cada fonte do usuário (servida em `/fonts/`). */
+function applyUserFontFaces(fonts) {
+  let style = document.getElementById('usefonts');
+  if (!style) {
+    style = document.createElement('style');
+    style.id = 'usefonts';
+    document.head.append(style);
+  }
+
+  style.textContent = fonts
+    .map((font) => {
+      const family = String(font.family || '').replace(/["\\]/g, '').trim();
+      if (!family || !font.url) return '';
+      const weight = String(font.weight || '400').replace(/[^\w\s.]/g, '');
+      const styleName = font.style === 'italic' || font.style === 'oblique' ? font.style : 'normal';
+      return `@font-face { font-family: "${family}"; src: url("${font.url}?v=${font.version || 0}"); font-weight: ${weight || 400}; font-style: ${styleName}; font-display: block; }`;
+    })
+    .join('\n');
+}
+
+function updateFontStatus() {
+  const el = $('fontstatus');
+  if (!el) return;
+  const dir = state.fontsDir || 'wincodeconfig/fonts';
+  el.textContent = userFonts.length
+    ? `${userFonts.length} fonte${userFonts.length > 1 ? 's' : ''} em ${dir}`
+    : `coloque .ttf/.otf em ${dir}`;
+  el.title = dir;
+}
+
+/** O Monaco desenha com canvas: depois da fonte carregar é preciso medir de novo. */
+async function ensureFontsLoaded() {
+  try {
+    await document.fonts?.ready;
+  } catch {
+    // Sem a API de fontes o canvas segue com a métrica que já tinha.
+  }
+  if (window.monaco && view) {
+    view.updateOptions({ fontFamily: settings.fontFamily });
+    window.monaco.editor.remeasureFonts?.();
+  }
+}
+
+async function loadUserFonts() {
+  try {
+    const data = await apiJson('/api/fonts');
+    userFonts = Array.isArray(data.fonts) ? data.fonts : [];
+    state.fontsDir = data.dir || '';
+    applyUserFontFaces(userFonts);
+    buildFontOptions();
+    updateFontStatus();
+    await ensureFontsLoaded();
+  } catch {
+    userFonts = [];
+    updateFontStatus();
+    const el = $('fontstatus');
+    if (el) el.textContent = 'não foi possível ler a pasta de fontes';
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Configurações (editor Monaco + interface + terminal)
@@ -673,6 +1063,7 @@ const resolvePath = (path) => {
 const SETTINGS_DEFAULTS = {
   theme: 'vs-dark',
   fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+  fontLigatures: false,
   fontSize: 13,
   lineHeight: 0,
   tabMode: 'space',
@@ -685,7 +1076,7 @@ const SETTINGS_DEFAULTS = {
   minimap: false,
   smoothScrolling: false,
   autoSave: false,
-  appTheme: 'dark',
+  appTheme: 'auto',
   uiFontSize: 13,
   sidebarWidth: 250,
   treeIcons: true,
@@ -707,19 +1098,20 @@ const SETTING_RANGES = {
 };
 
 const SETTING_ENUMS = {
-  theme: ['vs-dark', 'vs', 'hc-black', 'hc-light'],
+  theme: THEMES.map((theme) => theme.id),
   tabMode: ['space', 'tab'],
   wordWrap: ['off', 'on'],
   lineNumbers: ['on', 'off'],
   renderWhitespace: ['none', 'selection', 'trailing', 'all'],
   cursorBlinking: ['blink', 'smooth', 'phase', 'solid', 'expand'],
-  appTheme: ['dark', 'light'],
+  appTheme: ['auto', 'dark', 'light'],
 };
 
 // Chave da configuração → id do controle no painel.
 const SETTINGS_FIELDS = {
   theme: 'set-theme',
   fontFamily: 'set-fontfamily',
+  fontLigatures: 'set-ligatures',
   fontSize: 'set-fontsize',
   lineHeight: 'set-lineheight',
   tabMode: 'set-tabmode',
@@ -743,7 +1135,7 @@ const SETTINGS_FIELDS = {
   terminalFontSize: 'set-termfont',
 };
 
-const BOOL_SETTINGS = new Set(['detectIndentation', 'minimap', 'smoothScrolling', 'autoSave', 'treeIcons', 'showSidebar', 'showTabs', 'showTerminal']);
+const BOOL_SETTINGS = new Set(['detectIndentation', 'minimap', 'smoothScrolling', 'autoSave', 'fontLigatures', 'treeIcons', 'showSidebar', 'showTabs', 'showTerminal']);
 
 let settings = { ...SETTINGS_DEFAULTS };
 let settingsSaveTimer = null;
@@ -817,8 +1209,8 @@ function applyModelOptions(model) {
 }
 
 function applySettings({ persist = true } = {}) {
+  applyUiTheme();
   const root = document.documentElement.style;
-  document.body.classList.toggle('light', settings.appTheme === 'light');
   root.setProperty('--ui-font-size', `${settings.uiFontSize}px`);
   root.setProperty('--sidebar-width', `${settings.sidebarWidth}px`);
   root.setProperty('--term-font-size', `${settings.terminalFontSize}px`);
@@ -839,6 +1231,7 @@ function applySettings({ persist = true } = {}) {
     window.monaco.editor.setTheme(settings.theme);
     view.updateOptions({
       fontFamily: settings.fontFamily,
+      fontLigatures: settings.fontLigatures,
       fontSize: settings.fontSize,
       lineHeight: settings.lineHeight,
       tabSize: settings.tabSize,
@@ -891,6 +1284,8 @@ async function loadSettings() {
 function openSettings() {
   fillSettingsForm();
   els.settings.hidden = false;
+  // Fontes novas podem ter sido jogadas na pasta desde a última vez.
+  loadUserFonts();
   const first = document.getElementById('set-theme');
   if (first) first.focus();
 }
@@ -904,6 +1299,10 @@ function bindSettings() {
   $('setclose').addEventListener('click', closeSettings);
 
   $('setreset').addEventListener('click', resetSettings);
+  $('reloadfonts').addEventListener('click', () => {
+    setStatus('relendo fontes…');
+    loadUserFonts().then(() => setStatus(userFonts.length ? `${userFonts.length} fonte(s) carregada(s)` : 'nenhuma fonte personalizada encontrada'));
+  });
 
   $('sidebar-resize').addEventListener('mousedown', startResizeSidebar);
   $('terminal-resize').addEventListener('mousedown', startResizeTerminal);
@@ -933,7 +1332,9 @@ function scheduleAutoSave() {
 // ---------------------------------------------------------------------------
 // Paleta de comandos (Ctrl+Shift+P)
 // ---------------------------------------------------------------------------
-const MONACO_THEME_CYCLE = ['vs-dark', 'vs', 'hc-black', 'hc-light'];
+const THEME_CYCLE = THEMES.map((theme) => theme.id);
+const APP_THEME_CYCLE = ['auto', 'dark', 'light'];
+const APP_THEME_LABEL = { auto: 'seguir o tema do editor', dark: 'escuro', light: 'claro' };
 
 function setSetting(key, value) {
   settings = { ...settings, [key]: value };
@@ -1038,8 +1439,13 @@ function paletteCommands() {
     { title: 'abrir arquivo…', run: chooseFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
-    { title: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
-    { title: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+    // Criar só faz sentido com um projeto aberto (e fora do modo arquivo único).
+    ...(state.root && !state.selectionRequired && !state.singleFile
+      ? [
+          { title: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
+          { title: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+        ]
+      : []),
     { title: `${settings.showSidebar ? 'ocultar' : 'mostrar'} explorador`, hint: 'Ctrl+B', run: toggleSidebar },
     { title: `${settings.showTerminal ? 'ocultar' : 'mostrar'} terminal`, hint: 'Ctrl+J', run: toggleTerminal },
     { title: `${settings.showTabs ? 'ocultar' : 'mostrar'} abas de arquivo`, run: () => toggleSetting('showTabs') },
@@ -1072,13 +1478,16 @@ function paletteCommands() {
     {
       title: `próximo tema do editor (${settings.theme})`,
       run: () => {
-        const next = MONACO_THEME_CYCLE[(MONACO_THEME_CYCLE.indexOf(settings.theme) + 1) % MONACO_THEME_CYCLE.length];
+        const next = THEME_CYCLE[(THEME_CYCLE.indexOf(settings.theme) + 1) % THEME_CYCLE.length];
         setSetting('theme', next);
       },
     },
     {
-      title: `tema da interface: ${settings.appTheme === 'dark' ? 'claro' : 'escuro'}`,
-      run: () => setSetting('appTheme', settings.appTheme === 'dark' ? 'light' : 'dark'),
+      title: `tema da interface: ${APP_THEME_LABEL[settings.appTheme] || settings.appTheme}`,
+      run: () => {
+        const next = APP_THEME_CYCLE[(APP_THEME_CYCLE.indexOf(settings.appTheme) + 1) % APP_THEME_CYCLE.length];
+        setSetting('appTheme', next);
+      },
     },
     {
       title: `${settings.treeIcons ? 'ocultar' : 'mostrar'} ícones da árvore`,
@@ -1302,6 +1711,7 @@ function renderTabs() {
   }
 
   els.tabs.hidden = models.size === 0;
+  updateWelcome();
   const active = els.tabs.querySelector('.tabfile.active');
   if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
@@ -1649,9 +2059,31 @@ async function syncWorkspaceInfo() {
   const info = await apiJson('/api/root');
   state.root = info.root;
   state.cwd = info.cwd || info.root;
-  els.rootlabel.textContent = state.root;
+  state.singleFile = info.singleFile && info.file ? info.file : '';
+  els.rootlabel.textContent = workspaceLabel();
   els.rootlabel.title = state.root;
   updatePrompt();
+}
+
+/** Itens do menu do explorador: abrir pasta/arquivo, recarregar e criar. */
+function workspaceMenuEntries() {
+  const entries = [
+    { label: 'abrir pasta…', run: chooseFolder },
+    { label: 'abrir arquivo…', run: chooseFile },
+    { label: 'recarregar explorador', run: () => refreshTree() },
+  ];
+
+  // No modo arquivo único o explorador só mostra o arquivo aberto: criar itens
+  // ali não teria onde aparecer, então a ação fica fora do menu.
+  if (state.root && !state.selectionRequired && !state.singleFile) {
+    entries.push(
+      '-',
+      { label: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
+      { label: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+    );
+  }
+
+  return entries;
 }
 
 async function createEntry(dir, kind) {
@@ -2140,13 +2572,19 @@ function makeNode(item, depth) {
     event.stopPropagation();
     const dir = item.dir ? item.path : parentOf(item.path);
     state.selectedDir = dir;
-    showMenu(event.clientX, event.clientY, [
-      { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
-      { label: 'nova pasta', run: () => createEntry(dir, 'dir') },
-      '-',
+    const entries = [];
+    if (!state.singleFile) {
+      entries.push(
+        { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
+        { label: 'nova pasta', run: () => createEntry(dir, 'dir') },
+        '-',
+      );
+    }
+    entries.push(
       { label: 'renomear', run: () => renameEntry(item) },
       { label: 'excluir', danger: true, run: () => deleteEntry(item) },
-    ]);
+    );
+    showMenu(event.clientX, event.clientY, entries);
   });
 
   group.editorNode = { item, children, setOpen, depth };
@@ -2164,9 +2602,16 @@ async function restoreExpanded(group) {
 }
 
 async function refreshTree() {
+  if (state.selectionRequired || !state.root) {
+    els.tree.replaceChildren(emptyRow('nenhum projeto aberto', 0));
+    updateWelcome();
+    return;
+  }
+
   els.tree.innerHTML = '';
   try {
-    const items = await apiJson(api('/api/ls', { path: state.root }));
+    // `scope=tree`: em modo arquivo único a API devolve só o arquivo aberto.
+    const items = await apiJson(api('/api/ls', { path: state.root, scope: 'tree' }));
     fillChildren(els.tree, items, 0, 'pasta vazia');
     for (const group of Array.from(els.tree.children)) await restoreExpanded(group);
     highlightActiveRow();
@@ -2183,7 +2628,7 @@ async function refreshTree() {
  */
 async function refreshDir(path) {
   try {
-    const items = await apiJson(api('/api/ls', { path }));
+    const items = await apiJson(api('/api/ls', { path, scope: 'tree' }));
     if (path === state.root) {
       fillChildren(els.tree, items, 0, 'pasta vazia');
     } else {
@@ -2206,7 +2651,10 @@ let watchBusy = false;
 
 function watchPaths() {
   const paths = new Set();
-  if (state.root && !state.selectionRequired) paths.add(state.root);
+  // No modo arquivo único a pasta do arquivo costuma ser enorme (Downloads,
+  // Área de Trabalho): só o próprio arquivo é conferido.
+  if (state.root && !state.selectionRequired && !state.singleFile) paths.add(state.root);
+  if (state.singleFile) paths.add(state.singleFile);
   for (const path of state.expanded) paths.add(path);
   for (const path of models.keys()) paths.add(path);
   return Array.from(paths).slice(0, 200);
@@ -2272,11 +2720,19 @@ async function watchTick() {
   }
 }
 
+/** Rótulo da barra de título: pasta do projeto ou o arquivo aberto sozinho. */
+function workspaceLabel() {
+  if (state.selectionRequired || !state.root) return 'nenhuma pasta aberta';
+  if (state.singleFile) return `${baseName(state.singleFile)} — ${state.root}`;
+  return state.root;
+}
+
 function resetWorkspace(info) {
-  state.root = info.root;
-  state.cwd = info.cwd || info.root;
+  state.root = info.root || '';
+  state.cwd = info.cwd || state.root;
   state.selectionRequired = false;
-  els.rootlabel.textContent = state.root;
+  state.singleFile = info.singleFile && info.file ? info.file : '';
+  els.rootlabel.textContent = workspaceLabel();
   els.rootlabel.title = state.root;
   updatePrompt();
   state.selectedDir = state.root;
@@ -2297,15 +2753,113 @@ function resetWorkspace(info) {
 
   updateDirty();
   els.tree.innerHTML = '<div class="dim pad">carregando…</div>';
+  renderRecent();
 }
 
-function showWelcome() {
-  els.welcome.hidden = false;
-  $('welcomefolder').focus();
+/** O painel inicial aparece sempre que nenhum arquivo está aberto. */
+function updateWelcome() {
+  const show = models.size === 0;
+  els.welcome.hidden = !show;
+  if (show) renderRecent();
 }
 
-function hideWelcome() {
-  els.welcome.hidden = true;
+function renderRecent() {
+  const list = els.recentlist;
+  if (!list) return;
+
+  list.replaceChildren();
+  if (!state.recent.length) {
+    const empty = document.createElement('div');
+    empty.className = 'dim pad';
+    empty.textContent = state.selectionRequired
+      ? 'nenhum projeto aberto ainda'
+      : 'nenhum projeto recente — use abrir arquivo/pasta';
+    list.append(empty);
+    return;
+  }
+
+  for (const item of state.recent) {
+    const row = document.createElement('div');
+    row.className = 'recent-row';
+    row.title = item.path;
+    row.tabIndex = 0;
+
+    const icon = document.createElement('img');
+    icon.src = iconFor(item.name, item.dir);
+    icon.alt = '';
+    icon.draggable = false;
+    icon.addEventListener('error', () => { icon.src = `${ICON_BASE}/document.svg`; }, { once: true });
+
+    const text = document.createElement('span');
+    text.className = 'recent-text';
+    const name = document.createElement('span');
+    name.className = 'recent-name';
+    name.textContent = item.name;
+    const path = document.createElement('span');
+    path.className = 'recent-path';
+    path.textContent = item.path;
+    text.append(name, path);
+
+    const forget = document.createElement('button');
+    forget.type = 'button';
+    forget.className = 'recent-forget';
+    forget.textContent = '×';
+    forget.title = 'remover da lista';
+    forget.addEventListener('click', (event) => {
+      event.stopPropagation();
+      forgetRecent(item.path);
+    });
+
+    row.append(icon, text, forget);
+    row.addEventListener('click', () => openRecent(item.path));
+    row.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openRecent(item.path);
+      }
+    });
+    list.append(row);
+  }
+}
+
+async function loadRecent() {
+  try {
+    const items = await apiJson('/api/recent');
+    state.recent = Array.isArray(items) ? items : [];
+  } catch {
+    state.recent = [];
+  }
+  if (!els.welcome.hidden) renderRecent();
+}
+
+async function forgetRecent(path) {
+  try {
+    await apiJson(api('/api/recentremove', { path }), { method: 'POST' });
+  } catch {
+    // Sem persistência a lista só não é lembrada na próxima abertura.
+  }
+  state.recent = state.recent.filter((item) => item.path !== path);
+  renderRecent();
+}
+
+async function openRecent(path) {
+  setStatus('abrindo ' + shortPath(path) + '…');
+  try {
+    const info = await apiJson(api('/api/open', { path }));
+    resetWorkspace(info);
+    await refreshTree();
+    if (info.file) await openFile(info.file);
+    await loadRecent();
+    setStatus('aberto ' + shortPath(info.file || info.root));
+  } catch (err) {
+    setStatus('erro ao abrir: ' + err.message);
+    await loadRecent();
+    renderRecent();
+    if (state.selectionRequired) {
+      els.tree.replaceChildren(emptyRow('nenhum projeto aberto', 0));
+      updateWelcome();
+    }
+  }
 }
 
 async function chooseFolder() {
@@ -2314,17 +2868,15 @@ async function chooseFolder() {
     const result = await apiJson('/api/pickfolder');
     if (result.canceled || !result.root) {
       setStatus('pronto');
-      if (state.selectionRequired) showWelcome();
       return;
     }
     resetWorkspace(result);
-    hideWelcome();
     await refreshTree();
+    await loadRecent();
     setStatus('pasta aberta: ' + shortPath(result.root));
     els.cmdinput.focus();
   } catch (err) {
     setStatus('erro ao abrir pasta: ' + err.message);
-    if (state.selectionRequired) showWelcome();
   }
 }
 
@@ -2334,17 +2886,15 @@ async function chooseFile() {
     const result = await apiJson('/api/pickfile');
     if (result.canceled || !result.root || !result.file) {
       setStatus('pronto');
-      if (state.selectionRequired) showWelcome();
       return;
     }
     resetWorkspace(result);
-    hideWelcome();
     await refreshTree();
     await openFile(result.file);
+    await loadRecent();
     setStatus('arquivo aberto: ' + shortPath(result.file));
   } catch (err) {
     setStatus('erro ao abrir arquivo: ' + err.message);
-    if (state.selectionRequired) showWelcome();
   }
 }
 
@@ -2500,31 +3050,21 @@ function bindTerminal() {
     clearTerminal();
     focusTerminal();
   });
-  $('btnrefresh').addEventListener('click', () => { refreshTree(); });
-  $('btnopenfolder').addEventListener('click', chooseFolder);
   $('btntogglesidebar').addEventListener('click', toggleSidebar);
   $('btntoggleterminal').addEventListener('click', toggleTerminal);
-  $('btnopenfile').addEventListener('click', chooseFile);
   $('welcomefolder').addEventListener('click', chooseFolder);
   $('welcomefile').addEventListener('click', chooseFile);
 
   $('btnnewmenu').addEventListener('click', (event) => {
     const rect = event.currentTarget.getBoundingClientRect();
-    showMenu(rect.left, rect.bottom + 4, [
-      { label: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
-      { label: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
-    ]);
+    showMenu(rect.left, rect.bottom + 4, workspaceMenuEntries());
   });
 
-  // Clique direito no espaço vazio da árvore cria na pasta selecionada.
+  // Clique direito no espaço vazio da árvore: mesmas ações do menu do explorador.
   els.tree.addEventListener('contextmenu', (event) => {
     if (event.target.closest('.row')) return;
     event.preventDefault();
-    const dir = state.selectedDir || state.root;
-    showMenu(event.clientX, event.clientY, [
-      { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
-      { label: 'nova pasta', run: () => createEntry(dir, 'dir') },
-    ]);
+    showMenu(event.clientX, event.clientY, workspaceMenuEntries());
   });
 
   document.addEventListener('pointerdown', (event) => {
@@ -2600,29 +3140,37 @@ function bindTerminal() {
   bindTerminal();
   bindSettings();
   bindPalette();
+  buildThemeOptions();
+  buildFontOptions();
   try {
     await loadMonaco();
+    defineThemes();
     await loadSettings();
+    await loadRecent();
+    await loadUserFonts();
     startEditor();
     setStatus('editor pronto');
 
     const info = await apiJson('/api/root');
     state.root = info.root;
-    state.cwd = info.cwd;
+    state.cwd = info.cwd || info.root;
     state.selectedDir = state.root;
     state.selectionRequired = info.selectionRequired === true;
-    els.rootlabel.textContent = state.selectionRequired ? 'nenhuma pasta aberta' : state.root;
-    els.rootlabel.title = state.selectionRequired ? '' : state.root;
+    state.singleFile = info.singleFile && info.file ? info.file : '';
+    els.rootlabel.textContent = workspaceLabel();
+    els.rootlabel.title = state.root;
     updatePrompt();
+
     if (state.selectionRequired) {
-      showWelcome();
+      els.tree.replaceChildren(emptyRow('nenhum projeto aberto', 0));
       setStatus('selecione uma pasta ou arquivo para começar');
     } else {
-      hideWelcome();
       await refreshTree();
+      if (info.file) await openFile(info.file);
       updateDirty();
       els.cmdinput.focus();
     }
+    updateWelcome();
     setInterval(watchTick, 2000);
   } catch (err) {
     setStatus('falha na inicialização');

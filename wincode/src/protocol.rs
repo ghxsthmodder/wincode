@@ -1,6 +1,8 @@
 use crate::assets::Assets;
+use crate::fonts::Fonts;
 use crate::fsapi::FsState;
 use crate::jobs::Jobs;
+use crate::recent::Recent;
 use crate::settings::Settings;
 use wry::http::{header::CONTENT_TYPE, Request, Response, StatusCode};
 use std::borrow::Cow;
@@ -16,6 +18,8 @@ pub(super) fn serve(
     state: &Arc<Mutex<FsState>>,
     jobs: &Arc<Jobs>,
     settings: &Arc<Settings>,
+    fonts: &Arc<Fonts>,
+    recent: &Arc<Recent>,
     request: &Request<Vec<u8>>,
 ) -> Result<Response<Body>> {
     let uri = request.uri();
@@ -23,7 +27,31 @@ pub(super) fn serve(
     let query = uri.query();
 
     if let Some(route) = path.strip_prefix("/api/") {
-        return Ok(api(route, query, request.body(), state, jobs, settings));
+        return Ok(api(
+            route,
+            query,
+            request.body(),
+            state,
+            jobs,
+            settings,
+            fonts,
+            recent,
+        ));
+    }
+
+    // Fontes do usuário (`wincodeconfig/fonts`): servidas só dessa pasta.
+    if let Some(name) = path.strip_prefix("/fonts/") {
+        return Ok(match fonts.read(name) {
+            Some(bytes) => Response::builder()
+                .status(StatusCode::OK)
+                .header(CONTENT_TYPE, mime_for(name))
+                .header("Cache-Control", "public, max-age=3600")
+                .body(Cow::Owned(bytes))
+                .unwrap_or_else(|_| {
+                    plain(StatusCode::INTERNAL_SERVER_ERROR, "erro ao montar resposta")
+                }),
+            None => plain(StatusCode::NOT_FOUND, "fonte não encontrada"),
+        });
     }
 
     let rel = if path == "/" { "index.html" } else { path.as_str() };
@@ -48,19 +76,24 @@ fn api(
     state: &Arc<Mutex<FsState>>,
     jobs: &Arc<Jobs>,
     settings: &Arc<Settings>,
+    fonts: &Arc<Fonts>,
+    recent: &Arc<Recent>,
 ) -> Response<Body> {
     match route {
         "root" => {
             let guard = state.lock().unwrap();
-            json(serde_json::json!({
-                "root": guard.root.to_string_lossy(),
-                "cwd": guard.cwd.to_string_lossy(),
-                "selectionRequired": !guard.selected,
-            }))
+            json(workspace_json(&guard))
         }
-        "pickfolder" => pick_folder(state),
-        "pickfile" => pick_file(state),
-        "ls" => list(param(query, "path"), state),
+        "pickfolder" => pick_folder(state, recent),
+        "pickfile" => pick_file(state, recent),
+        "open" => open_entry(param(query, "path"), state, recent),
+        "recent" => json(recent.list()),
+        "recentremove" => {
+            recent.remove(&param(query, "path").unwrap_or_default());
+            json(serde_json::json!({ "ok": true }))
+        }
+        "fonts" => json(fonts.list()),
+        "ls" => list(param(query, "path"), param(query, "scope"), state),
         "read" => read(param(query, "path"), state),
         "write" => write(param(query, "path"), body, state),
         "create" => create(param(query, "path"), param(query, "kind"), state),
@@ -79,43 +112,90 @@ fn api(
     }
 }
 
-fn pick_folder(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+/// Estado da área de trabalho como o front-end o conhece. `file` só existe
+/// quando um arquivo foi aberto sozinho (modo arquivo único).
+fn workspace_json(guard: &FsState) -> serde_json::Value {
+    serde_json::json!({
+        "root": guard.root.to_string_lossy(),
+        "cwd": guard.cwd.to_string_lossy(),
+        "file": guard.open_file.as_ref().map(|file| file.to_string_lossy().to_string()),
+        "singleFile": guard.open_file.is_some(),
+        "selectionRequired": !guard.selected,
+    })
+}
+
+fn pick_folder(state: &Arc<Mutex<FsState>>, recent: &Arc<Recent>) -> Response<Body> {
     match crate::dialog::pick_folder() {
         Ok(Some(dir)) => {
-            let mut guard = state.lock().unwrap();
-            guard.set_root(dir.clone());
-            json(serde_json::json!({
-                "root": dir.to_string_lossy(),
-                "cwd": dir.to_string_lossy(),
-                "selectionRequired": false,
-            }))
+            let payload = {
+                let mut guard = state.lock().unwrap();
+                guard.set_root(dir.clone());
+                workspace_json(&guard)
+            };
+            recent.touch(&dir, "dir");
+            json(payload)
         }
         Ok(None) => json(serde_json::json!({ "canceled": true })),
         Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }
 }
 
-fn pick_file(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+fn pick_file(state: &Arc<Mutex<FsState>>, recent: &Arc<Recent>) -> Response<Body> {
     match crate::dialog::pick_file() {
         Ok(Some(file)) => {
-            let Some(dir) = file.parent().filter(|dir| !dir.as_os_str().is_empty()) else {
-                return plain(StatusCode::BAD_REQUEST, "o arquivo não está em uma pasta");
+            let payload = {
+                let mut guard = state.lock().unwrap();
+                if let Err(err) = guard.set_file(file.clone()) {
+                    return plain(StatusCode::BAD_REQUEST, &err);
+                }
+                workspace_json(&guard)
             };
-            let mut guard = state.lock().unwrap();
-            guard.set_root(dir.to_path_buf());
-            json(serde_json::json!({
-                "root": dir.to_string_lossy(),
-                "cwd": dir.to_string_lossy(),
-                "file": file.to_string_lossy(),
-                "selectionRequired": false,
-            }))
+            recent.touch(&file, "file");
+            json(payload)
         }
         Ok(None) => json(serde_json::json!({ "canceled": true })),
         Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }
 }
 
-fn list(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {
+/// Abre uma pasta ou um arquivo pelo caminho (usado pela lista de recentes).
+fn open_entry(
+    path_param: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+    recent: &Arc<Recent>,
+) -> Response<Body> {
+    let Some(requested) = path_param else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+
+    let path = std::path::PathBuf::from(&requested);
+    let kind = if path.is_dir() {
+        "dir"
+    } else if path.is_file() {
+        "file"
+    } else {
+        return plain(StatusCode::NOT_FOUND, &format!("caminho não encontrado: {requested}"));
+    };
+
+    let payload = {
+        let mut guard = state.lock().unwrap();
+        if kind == "dir" {
+            guard.set_root(path.clone());
+        } else if let Err(err) = guard.set_file(path.clone()) {
+            return plain(StatusCode::BAD_REQUEST, &err);
+        }
+        workspace_json(&guard)
+    };
+
+    recent.touch(&path, kind);
+    json(payload)
+}
+
+fn list(
+    path_param: Option<String>,
+    scope: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
     let guard = state.lock().unwrap();
     let requested = path_param.unwrap_or_else(|| guard.cwd.to_string_lossy().to_string());
 
@@ -123,6 +203,23 @@ fn list(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Bod
         Ok(dir) => dir,
         Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
     };
+
+    // Modo arquivo único: o explorador lista só o arquivo aberto. O terminal
+    // (`scope` ausente) continua enxergando a pasta inteira.
+    if scope.as_deref() == Some("tree") {
+        if let Some(file) = guard.pinned_file_in(&dir) {
+            let name = file
+                .file_name()
+                .map(|name| name.to_string_lossy().to_string())
+                .unwrap_or_default();
+            return json(serde_json::json!([{
+                "name": name,
+                "path": file.to_string_lossy(),
+                "dir": false,
+            }]));
+        }
+    }
+
     drop(guard);
 
     let read_dir = match std::fs::read_dir(&dir) {
@@ -353,6 +450,7 @@ fn rename(
     }
 
     guard.remap_cwd(&source, &target);
+    guard.remap_file(&source, &target);
 
     json(serde_json::json!({ "path": target.to_string_lossy() }))
 }
@@ -392,6 +490,7 @@ fn delete_entry(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Resp
     match result {
         Ok(()) => {
             guard.reset_cwd_if_inside(&target);
+            guard.clear_file_if_inside(&target);
             json(serde_json::json!({
                 "ok": true,
                 "path": target.to_string_lossy(),
