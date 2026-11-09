@@ -91,8 +91,9 @@ o editor.
 
 O explorador e o terminal podem ser redimensionados e ocultados:
 
-- arraste a alça vertical entre a árvore e o editor para mudar a largura do explorador
-  (180–520 px); arraste a alça horizontal acima do terminal para mudar a altura (100–400 px)
+- arraste a alça vertical à direita do explorador para mudar a largura (180–640 px,
+  sempre sobrando espaço para o editor); arraste a alça horizontal logo acima do terminal
+  para a altura (100–400 px). As alças acendem na cor de destaque ao passar o mouse
 - **Ctrl+B** mostra/oculta o explorador; **Ctrl+J** mostra/oculta o terminal
 - os botões **explorador** e **terminal** na barra superior fazem o mesmo, e o painel
   de configurações traz as opções de exibição e as medidas exatas
@@ -123,8 +124,8 @@ oferece **fechar arquivo atual**.
 
 ## Gerenciamento de arquivos e pastas
 
-No **Explorador**, use os botões `+ arquivo` / `+ pasta` no topo do painel ou o
-**clique direito** em qualquer item (ou no espaço vazio, para criar na raiz):
+No **Explorador**, use o menu **⋯** no topo do painel (com **novo arquivo** e **nova pasta**)
+ou o **clique direito** em qualquer item (ou no espaço vazio, para criar na raiz):
 
 - **novo arquivo** e **nova pasta** — criam dentro da pasta clicada (ou da pasta selecionada)
 - **renomear** — mantém o arquivo aberto no editor, inclusive alterações não salvas
@@ -198,6 +199,9 @@ Extensões desconhecidas abrem como texto puro.
   no diretório atual do terminal, com saída em streaming. O processo é criado com
   `CREATE_NO_WINDOW`, então **nenhuma janela de console aparece** sobre o editor
 - Comandos internos do terminal: `cd <pasta>`, `pwd`, `ls`/`dir`, `clear`/`cls`, `open <arquivo>`
+- O prompt é a última linha do buffer (não uma barra fixa): o comando digitado é ecoado ali
+  mesmo, rola junto com a saída e aceita **↑**/**↓** para o histórico (a linha em edição é
+  preservada ao voltar), **Ctrl+C** para abandonar a linha e **Ctrl+L** para limpar
 
 ## Desenvolvimento do front-end sem recompilar
 

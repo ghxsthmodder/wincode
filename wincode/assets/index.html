@@ -50,26 +50,32 @@
 
   .titlebar {
     display: flex; align-items: center; gap: 12px;
-    padding: 0 12px;
+    padding: 0 12px; min-width: 0; overflow: hidden;
     background: var(--panel);
     border-bottom: 1px solid var(--border);
     font-size: 12px;
   }
-  .brand { color: var(--accent2); font-weight: 600; letter-spacing: .04em; }
-  .rootlabel { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .brand { color: var(--accent2); font-weight: 600; letter-spacing: .04em; flex: 0 0 auto; }
+  .rootlabel { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
   .titlebar button {
+    flex: 0 0 auto; white-space: nowrap;
     background: transparent; border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 2px 8px; font: inherit; font-size: 11px; cursor: pointer;
   }
   .titlebar button:hover { background: rgba(255,255,255,.06); }
+  @media (max-width: 820px) {
+    .titlebar { gap: 6px; }
+    .titlebar .brand { display: none; }
+    .titlebar button { padding: 2px 6px; }
+  }
 
-  .panels { display: flex; min-height: 0; }
-  .main { flex: 1 1 0; min-width: 0; }
+  .panels { display: flex; min-height: 0; min-width: 0; overflow: hidden; }
+  .main { flex: 1 1 0; min-width: 0; min-height: 0; }
   .sidebar {
     flex: 0 0 var(--sidebar-width); width: var(--sidebar-width);
     background: var(--panel);
     border-right: 1px solid var(--border);
-    display: flex; flex-direction: column; min-height: 0; min-width: 0;
+    display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden;
   }
   .panel-title {
     display: flex; align-items: center; gap: 6px;
@@ -142,51 +148,59 @@
     display: flex; align-items: center; gap: 10px; padding: 4px 12px;
     border-bottom: 1px solid var(--border); font-size: 11px;
     text-transform: uppercase; letter-spacing: .08em; color: var(--muted);
+    flex: 0 0 auto; min-width: 0;
   }
-  .terminal-head .cwd { text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .terminal-head .cwd { text-transform: none; letter-spacing: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .terminal-head .spacer { flex: 1; }
   .terminal-head button {
+    flex: 0 0 auto; white-space: nowrap;
     background: transparent; border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer;
   }
+  /* O prompt é a última linha do buffer, não uma barra fixa: rola junto. */
   .termout {
-    flex: 1; overflow: auto; padding: 8px 12px; margin: 0;
+    flex: 1; overflow: auto; padding: 8px 12px; margin: 0; min-height: 0;
     font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
     font-size: var(--term-font-size); line-height: 1.45; white-space: pre-wrap; word-break: break-word;
     color: var(--text);
   }
-  .inputline { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-top: 1px solid var(--border); }
-  .prompt { color: var(--accent); font-family: ui-monospace, monospace; }
-  #cmdinput {
-    flex: 1; background: transparent; border: none; outline: none;
-    color: var(--text); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
-    font-size: var(--term-font-size);
+  .termout .inputline {
+    display: flex; align-items: center; gap: 6px;
+    padding: 0; border: 0; background: transparent;
   }
+  .prompt { color: var(--accent); font-family: ui-monospace, monospace; white-space: pre; }
+  #cmdinput {
+    flex: 1 1 auto; min-width: 0; background: transparent; border: none; outline: none; padding: 0;
+    color: var(--text); font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+    font-size: var(--term-font-size); line-height: 1.45;
+  }
+  #cmdinput::placeholder { color: var(--muted); }
+  body.resizing-x, body.resizing-x * { cursor: ew-resize !important; user-select: none !important; }
+  body.resizing-y, body.resizing-y * { cursor: ns-resize !important; user-select: none !important; }
 
   .statusbar {
     display: flex; align-items: center; gap: 16px; padding: 0 12px;
     background: var(--panel); border-top: 1px solid var(--border);
     color: var(--muted); font-size: 11px;
+    min-width: 0; overflow: hidden; white-space: nowrap;
   }
-  .statusbar .spacer { flex: 1; }
+  #statusmsg { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  #statusfile { overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
+  .statusbar .spacer { flex: 1 1 auto; }
   .dim { color: var(--muted); }
 
   :root { --editor-head-height: 30px; --terminal-height: 210px; }
 
   .panels .resize-handle {
-    position: relative; z-index: 5; flex: 0 0 6px; height: 100%; width: 6px; cursor: ew-resize; background: var(--border);
+    position: relative; z-index: 5; flex: 0 0 5px; height: 100%; width: 5px;
+    cursor: ew-resize; background: var(--border); touch-action: none;
   }
-  .panels .resize-handle::before {
-    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
-    background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
-  }
+  .panels .resize-handle:hover, body.resizing-x .panels .resize-handle { background: var(--accent); }
   .main .resize-handle.vert {
-    position: relative; z-index: 5; flex: 0 0 6px; width: 100%; height: 6px; cursor: ns-resize; background: var(--border);
+    position: relative; z-index: 5; flex: 0 0 5px; width: 100%; height: 5px;
+    cursor: ns-resize; background: var(--border); touch-action: none;
   }
-  .main .resize-handle.vert::before {
-    content: ''; position: absolute; top: 50%; left: 50%; width: 4px; height: 4px;
-    background: var(--muted); border-radius: 50%; transform: translate(-50%, -50%);
-  }
+  .main .resize-handle.vert:hover, body.resizing-y .main .resize-handle.vert { background: var(--accent); }
   .panels.hidden-sidebar .sidebar,
   .panels.hidden-sidebar .resize-handle { display: none; }
   .main.hidden-terminal .terminal,
@@ -308,23 +322,22 @@
     </header>
 
     <div class="panels">
-      <div class="resize-handle" id="sidebar-resize" title="Arraste para redimensionar o explorador"></div>
       <aside class="sidebar" id="sidebar">
         <div class="panel-title">
           <span>Explorador</span>
           <span class="spacer"></span>
-          <button id="btnnewfile" type="button" title="Novo arquivo na pasta selecionada">+ arquivo</button>
-          <button id="btnnewfolder" type="button" title="Nova pasta na pasta selecionada">+ pasta</button>
+          <button id="btnnewmenu" type="button" title="Novo arquivo ou pasta">⋯</button>
         </div>
         <div id="tree" class="tree"><div class="dim pad">carregando…</div></div>
       </aside>
+      <div class="resize-handle" id="sidebar-resize" title="Arraste para redimensionar o explorador"></div>
 
       <main class="main">
-      <div class="resize-handle vert" id="terminal-resize" title="Arraste para redimensionar o terminal"></div>
-      <div class="editor-head">
+        <div class="editor-head">
           <div id="tabs" class="tabs" hidden></div>
         </div>
         <div id="editor" class="editor"></div>
+        <div class="resize-handle vert" id="terminal-resize" title="Arraste para redimensionar o terminal"></div>
 
         <section class="terminal">
           <div class="terminal-head">
@@ -333,10 +346,11 @@
             <span class="spacer"></span>
             <button id="btnclear">limpar</button>
           </div>
-          <pre id="termout" class="termout"></pre>
-          <div class="inputline">
-            <span id="prompt" class="prompt">&gt;</span>
-            <input id="cmdinput" type="text" spellcheck="false" autocomplete="off" placeholder="dir, git status, cargo build…" />
+          <div id="termout" class="termout">
+            <div id="inputline" class="inputline">
+              <span id="prompt" class="prompt">&gt;</span>
+              <input id="cmdinput" type="text" spellcheck="false" autocomplete="off" placeholder="dir, git status, cargo build…" />
+            </div>
           </div>
         </section>
       </main>
@@ -545,6 +559,7 @@ const els = {
   paletteinput: $('paletteinput'),
   palettelist: $('palettelist'),
   termout: $('termout'),
+  inputline: $('inputline'),
   cmdinput: $('cmdinput'),
   welcome: $('welcome'),
   sidebar: $('sidebar'),
@@ -561,7 +576,7 @@ const els = {
 
 const state = {
   root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false,
-  history: [], historyIndex: 0, selectionRequired: false,
+  history: [], historyIndex: 0, historyDraft: '', selectionRequired: false,
 };
 const models = new Map();
 let view = null;
@@ -940,73 +955,80 @@ function resetSettings() {
   setStatus('configurações restauradas ao padrão');
 }
 
-let resizeTimer = null;
-let resizeActive = false;
+// A alça fica à direita do explorador: arrastar para a direita aumenta a largura.
 let resizeStartX = 0;
 let resizeStartWidth = 0;
+let resizeWidth = 0;
+let resizeActive = false;
+
+function maxSidebarWidth() {
+  // Sempre sobra um mínimo para o editor, mesmo em janelas estreitas.
+  return Math.max(180, Math.min(640, els.panels.clientWidth - 360));
+}
 
 function startResizeSidebar(event) {
+  if (event.button !== 0) return;
   event.preventDefault();
   resizeActive = true;
   resizeStartX = event.clientX;
-  resizeStartWidth = parseInt(getComputedStyle(els.sidebar).width, 10);
+  resizeStartWidth = els.sidebar.getBoundingClientRect().width;
+  resizeWidth = resizeStartWidth;
+  document.body.classList.add('resizing-x');
   document.addEventListener('mousemove', resizeSidebar);
   document.addEventListener('mouseup', stopResizeSidebar);
 }
 
 function resizeSidebar(event) {
   if (!resizeActive) return;
-  const dx = event.clientX - resizeStartX;
-  const next = resizeStartWidth + dx;
-  const min = parseInt(getComputedStyle(els.sidebar).minWidth, 10) || 180;
-  const max = parseInt(getComputedStyle(els.sidebar).maxWidth, 10) || 520;
-  const value = Math.min(max, Math.max(min, next));
-  els.sidebar.style.width = `${value}px`;
-  els.sidebar.style.flexBasis = `${value}px`;
-  setSetting('sidebarWidth', value);
+  resizeWidth = clamp(resizeStartWidth + (event.clientX - resizeStartX), 180, maxSidebarWidth());
+  // Durante o arrasto a variável CSS move o layout; nada de estilo inline acumulado.
+  document.documentElement.style.setProperty('--sidebar-width', `${resizeWidth}px`);
 }
 
 function stopResizeSidebar() {
   if (!resizeActive) return;
   resizeActive = false;
+  document.body.classList.remove('resizing-x');
   document.removeEventListener('mousemove', resizeSidebar);
   document.removeEventListener('mouseup', stopResizeSidebar);
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    setSetting('sidebarWidth', parseInt(els.sidebar.style.width, 10) || settings.sidebarWidth);
-  }, 300);
+  setSetting('sidebarWidth', Math.round(resizeWidth));
 }
 
+// A alça fica acima do terminal: arrastar para cima aumenta a altura.
 let resizeTerminalY = 0;
 let resizeTerminalStart = 0;
+let resizeTerminalHeight = 0;
+
+function maxTerminalHeight() {
+  // O editor nunca fica menor que ~140 px, então o terminal não o "engole".
+  return Math.max(100, Math.min(400, els.main.clientHeight - 140));
+}
 
 function startResizeTerminal(event) {
+  if (event.button !== 0) return;
   event.preventDefault();
   resizeTerminalY = event.clientY;
-  resizeTerminalStart = parseInt(getComputedStyle(els.terminal).height, 10);
+  resizeTerminalStart = els.terminal.getBoundingClientRect().height;
+  resizeTerminalHeight = resizeTerminalStart;
+  document.body.classList.add('resizing-y');
   document.addEventListener('mousemove', resizeTerminal);
   document.addEventListener('mouseup', stopResizeTerminal);
 }
 
 function resizeTerminal(event) {
-  const dy = event.clientY - resizeTerminalY;
-  const next = resizeTerminalStart + dy;
-  const min = parseInt(getComputedStyle(els.terminal).minHeight, 10) || 100;
-  const max = parseInt(getComputedStyle(els.terminal).maxHeight, 10) || 400;
-  const value = Math.min(max, Math.max(min, next));
-  els.terminal.style.height = `${value}px`;
-  setSetting('terminalHeight', value);
+  if (!event.buttons) return;
+  const next = resizeTerminalStart - (event.clientY - resizeTerminalY);
+  resizeTerminalHeight = clamp(next, 100, maxTerminalHeight());
+  document.documentElement.style.setProperty('--terminal-height', `${resizeTerminalHeight}px`);
 }
 
 function stopResizeTerminal() {
-  if (!resizeTerminalY) return;
+  if (!resizeTerminalY && !resizeTerminalHeight) return;
   resizeTerminalY = 0;
+  document.body.classList.remove('resizing-y');
   document.removeEventListener('mousemove', resizeTerminal);
   document.removeEventListener('mouseup', stopResizeTerminal);
-  clearTimeout(resizeTimer);
-  resizeTimer = setTimeout(() => {
-    setSetting('terminalHeight', parseInt(els.terminal.style.height, 10) || settings.terminalHeight);
-  }, 300);
+  setSetting('terminalHeight', Math.round(resizeTerminalHeight || settings.terminalHeight));
 }
 
 function paletteCommands() {
@@ -1021,8 +1043,8 @@ function paletteCommands() {
     { title: `${settings.showSidebar ? 'ocultar' : 'mostrar'} explorador`, hint: 'Ctrl+B', run: toggleSidebar },
     { title: `${settings.showTerminal ? 'ocultar' : 'mostrar'} terminal`, hint: 'Ctrl+J', run: toggleTerminal },
     { title: `${settings.showTabs ? 'ocultar' : 'mostrar'} abas de arquivo`, run: () => toggleSetting('showTabs') },
-    { title: 'focar terminal', run: () => els.cmdinput.focus() },
-    { title: 'limpar terminal', run: () => { els.termout.textContent = ''; } },
+    { title: 'focar terminal', run: () => focusTerminal() },
+    { title: 'limpar terminal', hint: 'Ctrl+L', run: () => { clearTerminal(); focusTerminal(); } },
     {
       title: `${settings.minimap ? 'ocultar' : 'mostrar'} minimapa`,
       run: () => toggleSetting('minimap'),
@@ -2262,8 +2284,20 @@ async function chooseFile() {
 // ---------------------------------------------------------------------------
 function termWrite(text) {
   if (!text) return;
-  els.termout.append(document.createTextNode(text));
+  // O texto entra antes da linha de comando, como em um terminal de verdade.
+  els.termout.insertBefore(document.createTextNode(text), els.inputline);
   els.termout.scrollTop = els.termout.scrollHeight;
+}
+
+function clearTerminal() {
+  for (const node of Array.from(els.termout.childNodes)) {
+    if (node !== els.inputline) node.remove();
+  }
+  els.termout.scrollTop = 0;
+}
+
+function focusTerminal() {
+  els.cmdinput.focus();
 }
 
 function updatePrompt() {
@@ -2288,11 +2322,12 @@ async function runCommandLine(input) {
 
   state.history.push(cmd);
   state.historyIndex = state.history.length;
-  termWrite(`\n${promptText()} ${cmd}\n`);
+  state.historyDraft = '';
+  termWrite(`${promptText()} ${cmd}\n`);
 
   const lower = cmd.toLowerCase();
   if (lower === 'clear' || lower === 'cls') {
-    els.termout.textContent = '';
+    clearTerminal();
     return;
   }
   if (lower === 'pwd') {
@@ -2351,6 +2386,7 @@ async function runCommandLine(input) {
 
 function bindTerminal() {
   els.cmdinput.addEventListener('keydown', (event) => {
+    const plain = !event.ctrlKey && !event.metaKey && !event.altKey;
     if (event.key === 'Enter') {
       event.preventDefault();
       const value = els.cmdinput.value;
@@ -2358,21 +2394,43 @@ function bindTerminal() {
       runCommandLine(value);
       return;
     }
-    if (event.key === 'ArrowUp') {
+    if (plain && event.key === 'ArrowUp') {
       event.preventDefault();
       if (!state.history.length) return;
+      if (state.historyIndex === state.history.length) state.historyDraft = els.cmdinput.value;
       state.historyIndex = Math.max(0, state.historyIndex - 1);
       els.cmdinput.value = state.history[state.historyIndex] || '';
       return;
     }
-    if (event.key === 'ArrowDown') {
+    if (plain && event.key === 'ArrowDown') {
       event.preventDefault();
+      if (state.historyIndex >= state.history.length) return;
       state.historyIndex = Math.min(state.history.length, state.historyIndex + 1);
-      els.cmdinput.value = state.history[state.historyIndex] || '';
+      els.cmdinput.value = state.historyIndex === state.history.length
+        ? state.historyDraft
+        : state.history[state.historyIndex] || '';
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
+      // Como num terminal: a linha digitada é abandonada, não apagada do buffer.
+      if (!els.cmdinput.value) return;
+      event.preventDefault();
+      termWrite(`${promptText()} ${els.cmdinput.value}^C\n`);
+      els.cmdinput.value = '';
+      state.historyIndex = state.history.length;
+      state.historyDraft = '';
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'l') {
+      event.preventDefault();
+      clearTerminal();
     }
   });
 
-  $('btnclear').addEventListener('click', () => { els.termout.textContent = ''; });
+  $('btnclear').addEventListener('click', () => {
+    clearTerminal();
+    focusTerminal();
+  });
   $('btnrefresh').addEventListener('click', () => { refreshTree(); });
   $('btnopenfolder').addEventListener('click', chooseFolder);
   $('btntogglesidebar').addEventListener('click', toggleSidebar);
@@ -2381,8 +2439,13 @@ function bindTerminal() {
   $('welcomefolder').addEventListener('click', chooseFolder);
   $('welcomefile').addEventListener('click', chooseFile);
 
-  $('btnnewfile').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'file'));
-  $('btnnewfolder').addEventListener('click', () => createEntry(state.selectedDir || state.root, 'dir'));
+  $('btnnewmenu').addEventListener('click', (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    showMenu(rect.left, rect.bottom + 4, [
+      { label: 'novo arquivo', run: () => createEntry(state.selectedDir || state.root, 'file') },
+      { label: 'nova pasta', run: () => createEntry(state.selectedDir || state.root, 'dir') },
+    ]);
+  });
 
   // Clique direito no espaço vazio da árvore cria na pasta selecionada.
   els.tree.addEventListener('contextmenu', (event) => {
@@ -2400,7 +2463,10 @@ function bindTerminal() {
   });
   window.addEventListener('blur', closeMenu);
   window.addEventListener('resize', closeMenu);
-  els.termout.addEventListener('click', () => els.cmdinput.focus());
+  els.termout.addEventListener('click', () => {
+    if (window.getSelection()?.toString()) return;
+    focusTerminal();
+  });
 
   window.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
