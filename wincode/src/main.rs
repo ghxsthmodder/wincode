@@ -15,6 +15,8 @@ use wry::application::event::{Event, StartCause, WindowEvent};
 use wry::application::event_loop::{ControlFlow, EventLoop};
 use wry::application::window::WindowBuilder;
 use wry::webview::WebViewBuilder;
+#[cfg(target_os = "windows")]
+use wry::webview::WebViewBuilderExtWindows;
 
 /// Pasta inicial: `WINCODE_ROOT`, primeiro argumento ou tela de seleção.
 fn root_from_args() -> Option<PathBuf> {
@@ -82,7 +84,7 @@ fn run() -> Result<(), String> {
     let jobs = Arc::new(jobs::Jobs::new());
     let settings = Arc::new(settings::Settings::new());
 
-    let _webview = WebViewBuilder::new(window)
+    let builder = WebViewBuilder::new(window)
         .map_err(|err| format!("não foi possível inicializar o WebView: {err}"))?
         .with_custom_protocol("editor".into(), {
             let assets = assets.clone();
@@ -90,7 +92,14 @@ fn run() -> Result<(), String> {
             let jobs = jobs.clone();
             let settings = settings.clone();
             move |request| protocol::serve(&assets, &state, &jobs, &settings, request)
-        })
+        });
+
+    // Sem atalhos do navegador: Ctrl+= / Ctrl+- / Ctrl+0 ficam com o editor em vez
+    // de darem zoom (ou abrirem o menu do Edge) por cima da interface.
+    #[cfg(target_os = "windows")]
+    let builder = builder.with_browser_accelerator_keys(false);
+
+    let _webview = builder
         .with_url("editor://localhost/index.html")
         .map_err(|err| format!("URL inicial inválida: {err}"))?
         .build()

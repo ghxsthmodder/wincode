@@ -500,7 +500,7 @@
 
         <label class="setting">
           <span class="label">largura do explorador<small>em pixels</small></span>
-          <input id="set-sidebar" type="number" min="180" max="520" step="10">
+          <input id="set-sidebar" type="number" min="180" max="640" step="10">
         </label>
 
         <label class="setting">
@@ -701,7 +701,7 @@ const SETTING_RANGES = {
   lineHeight: [0, 60],
   tabSize: [1, 8],
   uiFontSize: [10, 18],
-  sidebarWidth: [180, 520],
+  sidebarWidth: [180, 640],
   terminalFontSize: [9, 20],
   terminalHeight: [100, 400],
 };
@@ -1435,6 +1435,75 @@ async function saveActiveFile() {
   } catch (err) {
     setStatus('erro ao salvar: ' + err.message);
   }
+}
+
+/** Ctrl+Shift+S: grava todas as abas com alterações; a primeira falha interrompe. */
+async function saveAllFiles() {
+  let saved = 0;
+
+  for (const [path, entry] of models) {
+    const text = entry.model.getValue();
+    if (text === entry.saved) continue;
+
+    try {
+      const res = await fetch(api('/api/write', { path }), { method: 'POST', body: text });
+      if (!res.ok) throw new Error((await res.text()).trim());
+      entry.saved = text;
+      saved += 1;
+    } catch (err) {
+      updateDirty();
+      setStatus(`erro ao salvar ${baseName(path)}: ${err.message}`);
+      return;
+    }
+  }
+
+  updateDirty();
+  setStatus(saved ? `salvos ${saved} arquivo${saved > 1 ? 's' : ''}` : 'nada para salvar');
+}
+
+/** Ctrl+Tab / Ctrl+Shift+Tab: anda na ordem de abertura, dando a volta no fim. */
+function cycleTab(delta) {
+  const paths = Array.from(models.keys());
+  if (paths.length < 2) return;
+  const index = Math.max(0, paths.indexOf(activePath));
+  selectFile(paths[(index + delta + paths.length) % paths.length]);
+}
+
+const closeActiveTab = () => {
+  if (activePath) closeFile(activePath);
+};
+
+/** Ctrl+G: o mesmo diálogo de entrada dos outros comandos, sem `prompt()`. */
+async function goToLine() {
+  if (!view || !activePath) return;
+  const total = view.getModel().getLineCount();
+  const value = await showDialog({
+    title: 'Ir para linha',
+    message: `${baseName(activePath)} · 1–${total}`,
+    value: String(view.getPosition().lineNumber),
+    confirmLabel: 'ir',
+  });
+  if (!value) return;
+
+  const line = Number.parseInt(value, 10);
+  if (!Number.isFinite(line)) {
+    setStatus('linha inválida');
+    return;
+  }
+
+  const target = clamp(line, 1, total);
+  view.revealLineInCenter(target);
+  view.setPosition({ lineNumber: target, column: 1 });
+  view.focus();
+}
+
+/** Ctrl+= / Ctrl+- / Ctrl+0: só a fonte do editor, não a interface (zoom 0 = padrão). */
+function zoomEditor(step) {
+  const [min, max] = SETTING_RANGES.fontSize;
+  const next = step === 0 ? SETTINGS_DEFAULTS.fontSize : clamp(settings.fontSize + step, min, max);
+  if (next === settings.fontSize) return;
+  setSetting('fontSize', next);
+  setStatus(`fonte do editor ${next}px`);
 }
 
 // ---------------------------------------------------------------------------
@@ -2469,26 +2538,57 @@ function bindTerminal() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const ctrl = event.ctrlKey || event.metaKey;
+    const key = event.key.toLowerCase();
+
     if (event.key === 'Escape') {
       closeMenu();
       closeSettings();
       closePalette();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key === ',') {
+    if (ctrl && !event.altKey && event.key === ',') {
       event.preventDefault();
       openSettings();
     }
-    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    if (ctrl && !event.altKey && event.shiftKey && key === 's') {
+      event.preventDefault();
+      saveAllFiles();
+    } else if (ctrl && !event.altKey && !event.shiftKey && key === 's') {
       event.preventDefault();
       saveActiveFile();
     }
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'b') {
+    if (ctrl && !event.altKey && !event.shiftKey && key === 'b') {
       event.preventDefault();
       toggleSidebar();
     }
-    if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLowerCase() === 'j') {
+    if (ctrl && !event.altKey && !event.shiftKey && key === 'j') {
       event.preventDefault();
       toggleTerminal();
+    }
+    if (ctrl && !event.altKey && !event.shiftKey && key === 'w') {
+      event.preventDefault();
+      closeActiveTab();
+    }
+    if (ctrl && !event.altKey && event.key === 'Tab') {
+      // Impede o foco sair do editor para os controles da janela.
+      event.preventDefault();
+      cycleTab(event.shiftKey ? -1 : 1);
+    }
+    if (ctrl && !event.altKey && !event.shiftKey && key === 'g') {
+      event.preventDefault();
+      goToLine();
+    }
+    if (ctrl && !event.altKey && (event.key === '=' || event.key === '+')) {
+      event.preventDefault();
+      zoomEditor(1);
+    }
+    if (ctrl && !event.altKey && (event.key === '-' || event.key === '_')) {
+      event.preventDefault();
+      zoomEditor(-1);
+    }
+    if (ctrl && !event.altKey && event.key === '0') {
+      event.preventDefault();
+      zoomEditor(0);
     }
   });
 }

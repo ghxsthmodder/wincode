@@ -182,10 +182,20 @@ persistem na hora, do mesmo jeito que no painel.
 ## Atalhos e comandos
 
 - `Ctrl+S` — salva o arquivo aberto
+- `Ctrl+Shift+S` — salva todas as abas com alterações
+- `Ctrl+W` — fecha a aba atual (pede confirmação se houver alterações)
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` — próxima/anterior, na ordem de abertura
+- `Ctrl+G` — vai para uma linha
+- `Ctrl+=` / `Ctrl+-` / `Ctrl+0` — aumenta, diminui ou volta a fonte do editor ao padrão
+- `Shift+Alt+F` — formata o documento nas linguagens com formatador no Monaco
+  (JavaScript/TypeScript, JSON, CSS, HTML)
 - `Ctrl+,` — abre/fecha as configurações (`Esc` também fecha)
 - `Ctrl+Shift+P` — abre a paleta de comandos (`Esc` também fecha)
 - `Ctrl+B` — mostra/oculta o explorador
 - `Ctrl+J` — mostra/oculta o terminal
+
+Os atalhos do navegador embutido (recarregar, imprimir, zoom da página) ficam desligados
+na janela, então combinações como `Ctrl+=` chegam ao editor em vez de ampliar a interface.
 
 ## Linguagens
 
