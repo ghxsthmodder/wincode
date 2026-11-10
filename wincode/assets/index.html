@@ -311,7 +311,26 @@
   .gitlist .gitrow:last-child { border-bottom: 0; }
   .gitlist .gitrow:hover { background: rgba(127,127,127,.12); }
   .gitlist .gitrow .code { flex: 0 0 12px; font-weight: 600; color: var(--accent2); }
-  .gitlist .gitrow .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gitlist .gitrow .path {
+    flex: 1; min-width: 0; padding: 2px 0; border: 0; background: transparent;
+    color: var(--text); font: inherit; text-align: left; cursor: pointer;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .gitlist .gitrow .path:hover { color: var(--accent2); text-decoration: underline; }
+  .gitlist .gitrow .acts { display: flex; gap: 4px; flex: 0 0 auto; }
+  .gitlist .gitrow .mini, .gitlist .githead .mini {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 3px; padding: 0 5px; font: inherit; font-size: 10.5px; cursor: pointer;
+  }
+  .gitlist .gitrow .mini:hover, .gitlist .githead .mini:hover {
+    color: var(--text); border-color: var(--accent);
+  }
+  .gitlist .githead {
+    position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+    padding: 3px 8px; background: var(--panel); border-bottom: 1px solid var(--border);
+    font-size: 11px; color: var(--muted);
+  }
+  .gitlist .githead span { flex: 1; }
   .gitlist .gitempty { padding: 10px; text-align: center; }
   .gitdialog textarea {
     width: 100%; min-height: 58px; resize: vertical; padding: 6px 8px;
@@ -381,6 +400,7 @@
   }
   .searchopts button:hover { color: var(--text); }
   .searchopts button.on { border-color: var(--accent); color: var(--accent); }
+  .searchopts button[hidden] { display: none; }
   .searchopts .spacer { flex: 1; }
 
   /* Painel inicial no lugar do editor, como a aba Welcome do VSCode. */
@@ -728,6 +748,7 @@
         <button id="searchcase" type="button" title="Diferenciar maiúsculas de minúsculas">Aa</button>
         <button id="searchregex" type="button" title="Usar expressão regular">.*</button>
         <span class="spacer"></span>
+        <button id="searchundo" type="button" hidden title="Desfazer a última substituição em arquivos">desfazer</button>
         <button id="searchreplace" type="button" title="Substituir em todos os arquivos do projeto">substituir…</button>
       </div>
       <div id="palettelist" class="palettelist"></div>
@@ -766,6 +787,7 @@ const els = {
   searchcase: $('searchcase'),
   searchregex: $('searchregex'),
   searchreplace: $('searchreplace'),
+  searchundo: $('searchundo'),
   git: $('git'),
   gitbranch: $('gitbranch'),
   gitsummary: $('gitsummary'),
@@ -1648,6 +1670,7 @@ function paletteCommands() {
     { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
     { title: 'buscar em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
     { title: 'buscar e substituir em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
+    { title: 'desfazer a última substituição em arquivos', run: undoReplace },
     { title: 'ir para símbolo no arquivo…', hint: 'Ctrl+Shift+O', run: openSymbols },
     { title: 'reabrir aba fechada', hint: 'Ctrl+Shift+T', run: reopenClosedTab },
     { title: 'revelar arquivo ativo no explorador', run: () => revealInExplorer(activePath) },
@@ -1850,9 +1873,13 @@ const searchOptions = () => ({
   case: searchState.caseSensitive ? 1 : 0,
 });
 
+/** Existe substituição recente que o backend ainda consegue reverter. */
+let lastReplace = false;
+
 function syncSearchOptions() {
   els.searchcase.classList.toggle('on', !!searchState.caseSensitive);
   els.searchregex.classList.toggle('on', !!searchState.regex);
+  els.searchundo.hidden = !lastReplace;
 }
 
 /** Comandos filtrados pela paleta (Ctrl+Shift+P). */
@@ -1977,13 +2004,46 @@ async function replaceInFiles() {
     const files = Number(result.files) || 0;
     const total = Number(result.replacements) || 0;
     const failed = Array.isArray(result.errors) && result.errors.length;
+    lastReplace = !!result.undo;
+    syncSearchOptions();
     setStatus(
       files
-        ? `${total} substituição(ões) em ${files} arquivo(s)${failed ? ' — houve falhas' : ''}`
+        ? `${total} substituição(ões) em ${files} arquivo(s)${failed ? ' — houve falhas' : ''}${
+            lastReplace ? ' — desfazer na busca ou na paleta' : ''
+          }`
         : 'nada foi substituído',
     );
   } catch (err) {
     setStatus('substituição falhou: ' + err.message);
+  }
+}
+
+/**
+ * Desfaz a última substituição em arquivos. O backend guarda o texto anterior de
+ * uma substituição por vez; desfazer duas vezes não existe.
+ */
+async function undoReplace() {
+  if (!lastReplace) {
+    setStatus('nada para desfazer: nenhuma substituição recente');
+    return;
+  }
+
+  try {
+    const result = await apiJson('/api/undoreplace', { method: 'POST' });
+    lastReplace = false;
+    syncSearchOptions();
+    state.fileIndex = null;
+    await reloadCleanTabs();
+    await refreshTree();
+    refreshGit();
+    if (paletteMode === 'search' && !els.palette.hidden) scheduleSearch();
+
+    const failed = Array.isArray(result.errors) && result.errors.length;
+    setStatus(
+      `${Number(result.files) || 0} arquivo(s) restaurado(s)${failed ? ' — houve falhas' : ''}`,
+    );
+  } catch (err) {
+    setStatus('não foi possível desfazer: ' + err.message);
   }
 }
 
@@ -2274,6 +2334,7 @@ function bindPalette() {
   els.searchcase.addEventListener('click', () => toggleSearch('caseSensitive'));
   els.searchregex.addEventListener('click', () => toggleSearch('regex'));
   els.searchreplace.addEventListener('click', () => replaceInFiles());
+  els.searchundo.addEventListener('click', () => undoReplace());
 
   els.palette.addEventListener('pointerdown', (event) => {
     if (event.target === els.palette) closePalette();
@@ -3881,7 +3942,10 @@ async function refreshDir(path) {
 // ---------------------------------------------------------------------------
 // Git (branch, marcadores no explorador e commit)
 // ---------------------------------------------------------------------------
-let gitState = { repo: false, branch: '', detached: false, ahead: 0, behind: 0, list: [], changes: new Map() };
+let gitState = {
+  repo: false, branch: '', detached: false, ahead: 0, behind: 0,
+  list: [], changes: new Map(), diff: null,
+};
 
 /** Caminho relativo à raiz, no formato que o `git status` devolve. */
 function gitRelative(path) {
@@ -3908,10 +3972,14 @@ async function refreshGit() {
       behind: Number(data.behind) || 0,
       list,
       changes: new Map(list.map((change) => [normalizePath(change.path), change.code])),
+      diff: gitState.diff,
     };
   } catch {
     // Sem git instalado a interface só não mostra nada de repositório.
-    gitState = { repo: false, branch: '', detached: false, ahead: 0, behind: 0, list: [], changes: new Map() };
+    gitState = {
+      repo: false, branch: '', detached: false, ahead: 0, behind: 0,
+      list: [], changes: new Map(), diff: null,
+    };
   }
 
   renderGitBadge();
@@ -3959,51 +4027,159 @@ function applyGitMarks() {
   }
 }
 
+/** Separa o que já está no índice do que ainda está só na árvore de trabalho. */
+function gitSections() {
+  const staged = [];
+  const unstaged = [];
+  for (const change of gitState.list) {
+    if (change.index) staged.push(change);
+    if (change.worktree) unstaged.push(change);
+  }
+  return { staged, unstaged };
+}
+
+function gitRow(change, staged) {
+  const row = document.createElement('div');
+  row.className = 'gitrow';
+  row.title = change.path;
+
+  const code = document.createElement('span');
+  code.className = 'code';
+  code.textContent = (staged ? change.index : change.worktree) || '•';
+
+  const path = document.createElement('button');
+  path.type = 'button';
+  path.className = 'path';
+  path.textContent = change.path;
+  path.title = `${change.path} — abrir`;
+  path.addEventListener('click', () => {
+    closeGit();
+    openFile(joinRoot(change.path));
+  });
+
+  const acts = document.createElement('span');
+  acts.className = 'acts';
+
+  const diff = document.createElement('button');
+  diff.type = 'button';
+  diff.className = 'mini';
+  diff.textContent = 'diff';
+  diff.title = staged ? 'ver o que está preparado' : 'ver o que mudou no disco';
+  diff.addEventListener('click', () => showDiff(change.path, staged));
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'mini';
+  toggle.textContent = staged ? '−' : '+';
+  toggle.title = staged ? 'tirar do commit (despreparar)' : 'incluir no commit (preparar)';
+  toggle.addEventListener('click', () => stageChange([change.path], !staged));
+
+  acts.append(diff, toggle);
+  row.append(code, path, acts);
+  return row;
+}
+
+function gitSection(title, changes, staged) {
+  const head = document.createElement('div');
+  head.className = 'githead';
+
+  const label = document.createElement('span');
+  label.textContent = `${title} (${changes.length})`;
+
+  const bulk = document.createElement('button');
+  bulk.type = 'button';
+  bulk.className = 'mini';
+  bulk.textContent = staged ? 'despreparar tudo' : 'preparar tudo';
+  bulk.addEventListener('click', () => stageChange(changes.map((change) => change.path), !staged));
+
+  head.append(label, bulk);
+  els.gitlist.append(head);
+  for (const change of changes) els.gitlist.append(gitRow(change, staged));
+}
+
 function renderGitPanel() {
   els.gitbranch.textContent = gitState.repo
     ? (gitState.detached ? 'HEAD destacado' : gitState.branch || 'sem branch')
     : 'sem repositório';
 
-  const count = gitState.list.length;
+  const { staged, unstaged } = gitSections();
   const bits = [];
   if (!gitState.repo) {
     bits.push('nenhum repositório git nesta pasta');
   } else {
-    bits.push(count ? `${count} arquivo(s) alterado(s)` : 'sem alterações');
+    bits.push(staged.length ? `${staged.length} preparado(s) para o commit` : 'nada preparado');
+    bits.push(unstaged.length ? `${unstaged.length} alterado(s) no disco` : 'sem alterações no disco');
     if (gitState.ahead) bits.push(`${gitState.ahead} commit(s) à frente`);
     if (gitState.behind) bits.push(`${gitState.behind} atrás`);
   }
   els.gitsummary.textContent = bits.join(' · ');
 
   els.gitlist.replaceChildren();
-  if (!gitState.repo || !count) {
+  if (!gitState.repo) {
     const empty = document.createElement('div');
     empty.className = 'gitempty dim';
-    empty.textContent = gitState.repo ? 'nada para commitar' : 'abra uma pasta que seja um repositório git';
+    empty.textContent = 'abra uma pasta que seja um repositório git';
     els.gitlist.append(empty);
     return;
   }
 
-  for (const change of gitState.list) {
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = 'gitrow';
-    row.title = change.path;
+  if (!staged.length && !unstaged.length) {
+    const empty = document.createElement('div');
+    empty.className = 'gitempty dim';
+    empty.textContent = 'nada para commitar';
+    els.gitlist.append(empty);
+    return;
+  }
 
-    const code = document.createElement('span');
-    code.className = 'code';
-    code.textContent = change.code || '•';
+  // O que está preparado é o que o commit leva; o resto fica de fora.
+  if (staged.length) gitSection('preparado para o commit', staged, true);
+  if (unstaged.length) gitSection('alterações no disco', unstaged, false);
+}
 
-    const path = document.createElement('span');
-    path.className = 'path';
-    path.textContent = change.path;
+/** Prepara/desprepara arquivos e atualiza o painel (o commit segue o índice). */
+async function stageChange(paths, stage) {
+  const unique = Array.from(new Set(paths.filter(Boolean)));
+  if (!unique.length) return;
 
-    row.append(code, path);
-    row.addEventListener('click', () => {
-      closeGit();
-      openFile(joinRoot(change.path));
+  try {
+    await apiJson('/api/gitstage', {
+      method: 'POST',
+      body: JSON.stringify({ paths: unique, stage: !!stage }),
     });
-    els.gitlist.append(row);
+    setStatus(`${stage ? 'preparado' : 'despreparado'}: ${unique.length} arquivo(s)`);
+    await refreshGit();
+    // O diff aberto mudou de lado: mostra o do estado em que o arquivo ficou.
+    if (gitState.diff && unique.includes(gitState.diff.path)) {
+      await showDiff(gitState.diff.path, !!stage);
+    }
+  } catch (err) {
+    setStatus(`git: ${err.message}`);
+  }
+}
+
+/** Mostra o diff de um arquivo no mesmo `<pre>` da saída do commit. */
+async function showDiff(path, staged) {
+  try {
+    const data = await apiJson(api('/api/gitdiff', { path, staged: staged ? 1 : 0 }));
+    els.gitoutput.hidden = false;
+
+    if (!data.text) {
+      const untracked = gitState.list.some(
+        (change) => change.path === path && change.worktree === '?',
+      );
+      els.gitoutput.textContent = !staged && untracked
+        ? `${path}\n\narquivo novo (não rastreado): prepare com + para ver o diff`
+        : `${path}\n\nsem diferenças aqui`;
+      gitState.diff = null;
+      return;
+    }
+
+    els.gitoutput.textContent = `${path} (${staged ? 'preparado' : 'no disco'})\n\n${data.text}${
+      data.truncated ? '\n\n[diff cortado: arquivo grande]' : ''
+    }`;
+    gitState.diff = { path, staged };
+  } catch (err) {
+    setStatus(`git: ${err.message}`);
   }
 }
 
@@ -4014,6 +4190,7 @@ async function openGit() {
   }
   els.git.hidden = false;
   els.gitoutput.hidden = true;
+  gitState.diff = null;
   await refreshGit();
   if (gitState.repo && gitState.list.length) els.gitmessage.focus();
 }
@@ -4039,12 +4216,19 @@ async function commitGit() {
   button.disabled = true;
   setStatus('commitando…');
   try {
-    const result = await apiJson('/api/gitcommit', { method: 'POST', body: message });
+    // Com arquivos preparados o commit leva só eles; sem nada preparado, leva
+    // tudo (o `git add -A` de antes).
+    const { staged } = gitSections();
+    const result = await apiJson('/api/gitcommit', {
+      method: 'POST',
+      body: JSON.stringify({ message, all: staged.length === 0 }),
+    });
     els.gitoutput.hidden = false;
     els.gitoutput.textContent = result.output || (result.ok ? 'commit criado' : 'o git recusou o commit');
 
     if (result.ok) {
       els.gitmessage.value = '';
+      gitState.diff = null;
       state.fileIndex = null;
       setStatus('commit criado');
       await refreshGit();
@@ -4253,6 +4437,8 @@ async function restoreSession() {
 /** Abre um projeto e retoma a sessão anterior dele. */
 async function applyWorkspace(info) {
   resetWorkspace(info);
+  // O terminal é por projeto: a seta para cima não mistura os dois repositórios.
+  await loadHistory(state.root);
 
   if (info.singleFile) {
     await refreshTree();
@@ -4688,30 +4874,43 @@ async function changeDir(target) {
 // ---------------------------------------------------------------------------
 
 let historySaveTimer = null;
+/** De qual projeto é a lista em `state.history` (o backend guarda por pasta). */
+let historyRoot = '';
 
-/** Histórico antigo (`wincodeconfig/history.json`) entra na frente do atual. */
-async function loadHistory() {
+/** Grava já a lista do projeto atual (usada ao trocar de projeto). */
+function flushHistory() {
+  clearTimeout(historySaveTimer);
+  if (!state.history.length) return;
+  fetch('/api/savehistory', {
+    method: 'POST',
+    body: JSON.stringify({ root: historyRoot, entries: state.history.slice(-500) }),
+  }).catch(() => {});
+}
+
+/**
+ * Troca o histórico do terminal pelo do projeto (`wincodeconfig/history.json`).
+ * A lista do projeto anterior é gravada antes; projeto novo herda a
+ * compartilhada (comandos dados sem projeto aberto).
+ */
+async function loadHistory(root = state.root || '') {
+  clearTimeout(historySaveTimer);
+  if (root !== historyRoot) flushHistory();
+  historyRoot = root;
+
   try {
-    const data = await apiJson('/api/history');
-    if (!Array.isArray(data) || !data.length) return;
-    const merged = data.filter((entry) => typeof entry === 'string' && entry)
-      .concat(state.history)
-      .slice(-500);
-    state.history = merged;
-    state.historyIndex = merged.length;
+    const data = await apiJson(api('/api/history', { root }));
+    state.history = Array.isArray(data)
+      ? data.filter((entry) => typeof entry === 'string' && entry)
+      : [];
   } catch {
     // Sem histórico persistido o terminal funciona igual, só não lembra.
   }
+  state.historyIndex = state.history.length;
 }
 
 function scheduleHistorySave() {
   clearTimeout(historySaveTimer);
-  historySaveTimer = setTimeout(() => {
-    fetch('/api/savehistory', {
-      method: 'POST',
-      body: JSON.stringify(state.history.slice(-500)),
-    }).catch(() => {});
-  }, 1200);
+  historySaveTimer = setTimeout(flushHistory, 1200);
 }
 
 /** Abre (se preciso) o terminal já apontado para uma pasta do explorador. */

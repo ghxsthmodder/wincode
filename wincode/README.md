@@ -159,10 +159,15 @@ A saída é **tratada antes de aparecer**, porque um pipe não é um terminal de
 ## Git
 
 Quando a pasta aberta é um repositório, a barra de status mostra **⑂ branch • N**
-(alterações pendentes); clicar abre o painel. Nele estão a lista de arquivos alterados
-(clicar abre o arquivo), o resumo com quantos commits está à frente/atrás e o campo de
-mensagem do commit — o **commit** faz `git add -A` + `git commit -m` e mostra a saída do
-git (inclusive "nothing to commit").
+(alterações pendentes); clicar abre o painel. Nele estão a lista dividida em **preparado
+para o commit** e **alterações no disco** (clicar no nome abre o arquivo), o resumo com
+quantos commits está à frente/atrás e o campo de mensagem do commit.
+
+Cada linha tem **diff** (o que mudou naquele lado, no mesmo lugar da saída do commit) e
+**+**/**−** para colocar no índice ou tirar dele; os cabeçalhos de seção preparam ou
+despreparam tudo de uma vez. O **commit** leva só o que está preparado — com o índice
+vazio, ele prepara tudo (`git add -A`) como antes — e mostra a saída do git (inclusive
+"nothing to commit").
 
 As linhas do explorador ganham a letra do estado: **M** alterado, **A** novo no índice,
 **D** excluído, **R** renomeado, **?** não rastreado. O status é pedido ao abrir o painel,
@@ -186,10 +191,13 @@ salvas nunca são sobrescritas — salve ou descarte antes.
 
 ## Histórico do terminal
 
-Os comandos digitados ficam em `wincodeconfig/history.json` (os 500 últimos, sem
-repetições seguidas) e voltam na próxima execução — a seta para cima lembra o comando de
-ontem em qualquer pasta. O arquivo é gravado cerca de um segundo depois do comando, então
-fechar o editor logo em seguida ainda não perde o último.
+Os comandos digitados ficam em `wincodeconfig/history.json` (os 500 últimos por projeto,
+sem repetições seguidas) e voltam na próxima execução — a seta para cima lembra o comando
+de ontem naquele repositório sem misturar com o outro. Comandos dados sem projeto aberto
+ficam numa lista compartilhada, que também serve de ponto de partida para um projeto novo.
+O arquivo é gravado cerca de um segundo depois do comando (e de imediato ao trocar de
+pasta), então fechar o editor logo em seguida ainda não perde o último. Ficam guardados os
+20 projetos usados por último.
 
 ## Abas
 
@@ -265,6 +273,10 @@ as abas abertas **sem** alterações pendentes são relidas do disco; as sujas f
 estão. Limites por busca: 200 ocorrências (20 por arquivo), arquivos até 1 MB, binários de
 fora e orçamento de 1,5 s (5 s na substituição); quando algo fica de fora, a barra de
 status avisa.
+
+Logo depois da troca, **desfazer** (no rodapé da busca ou na paleta) devolve o texto
+anterior de todos os arquivos tocados. Vale uma vez: a próxima substituição toma o lugar
+do backup.
 
 ## Sessão por projeto
 
@@ -390,7 +402,7 @@ Comandos disponíveis:
   abas e terminal, terminal em tela cheia, focar e limpar o terminal, **interromper o
   comando em execução** (só aparece enquanto há um), **painel do git**
 - **busca**: buscar em arquivos, buscar e substituir em arquivos, escolher as opções de
-  caixa e de expressão regular
+  caixa e de expressão regular, desfazer a última substituição
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
   ícones da árvore e salvamento automático; restaurar padrões
@@ -466,13 +478,15 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - **Ir para símbolo** é um mapa textual, não o *outline* de um servidor de linguagem:
   declarações em linhas com formato incomum (multi-linha, geradas, dentro de expressões)
   podem não aparecer.
-- O git depende do `git.exe` no PATH; o painel faz status e commit de tudo, sem staging
-  por arquivo, diff embutido, branches ou `push`/`pull` (esses continuam no terminal).
+- O git depende do `git.exe` no PATH; o painel faz status, staging e commit, sem troca de
+  branch nem `push`/`pull` (esses continuam no terminal). Arquivo ainda não rastreado só
+  ganha diff depois de preparado.
 - A substituição em arquivos só mexe no que o índice encontra: pastas ignoradas (`.git`,
   `node_modules`, `target`…), binários e arquivos acima de 1 MB ficam de fora, e arquivos
-  com alterações não salvas não são recarregados.
-- O histórico do terminal guarda os 500 comandos mais recentes de todas as pastas, sem
-  separar por projeto.
+  com alterações não salvas não são recarregados. O desfazer guarda só a última
+  substituição, e apenas enquanto o backup couber em 8 MB.
+- O histórico do terminal guarda os 500 comandos mais recentes de cada projeto; projetos
+  além dos 20 usados por último são esquecidos.
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
   que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.

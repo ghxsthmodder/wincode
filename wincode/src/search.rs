@@ -1,5 +1,6 @@
 use regex::{NoExpand, Regex, RegexBuilder};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Teto de ocorrências devolvidas: refinar a busca é digitar mais.
@@ -14,6 +15,23 @@ const BUDGET: Duration = Duration::from_millis(1500);
 const REPLACE_BUDGET: Duration = Duration::from_secs(5);
 /// Caracteres da linha mostrados na prévia.
 const MAX_PREVIEW: usize = 200;
+/// Teto do que fica guardado para desfazer a última substituição. Acima disso o
+/// desfazer fica indisponível — melhor recusar do que reverter pela metade.
+const UNDO_BYTES: usize = 8 * 1024 * 1024;
+
+/// Conteúdo anterior dos arquivos da última substituição, para desfazer uma vez.
+struct Snapshot {
+    root: PathBuf,
+    files: Vec<(PathBuf, String)>,
+}
+
+/// Uma substituição por vez: desfazer a anterior (ou pedir de novo) é o que a
+/// interface oferece. Guardar um histórico de substituições custaria muito mais
+/// memória por um caso raro.
+fn last() -> &'static Mutex<Option<Snapshot>> {
+    static LAST: OnceLock<Mutex<Option<Snapshot>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(None))
+}
 
 /// Como o texto é interpretado: busca literal (escapada) ou expressão regular,
 /// com ou sem diferenciar maiúsculas.
@@ -119,6 +137,9 @@ pub(super) fn replace(
     let mut replacements = 0usize;
     let mut errors: Vec<String> = Vec::new();
     let mut truncated = false;
+    let mut originals: Vec<(PathBuf, String)> = Vec::new();
+    let mut backup_bytes = 0usize;
+    let mut can_undo = true;
 
     for relative in crate::index::list(root) {
         if started.elapsed() > REPLACE_BUDGET {
@@ -151,16 +172,66 @@ pub(super) fn replace(
             Ok(()) => {
                 files += 1;
                 replacements += count;
+                backup_bytes += text.len();
+                if backup_bytes > UNDO_BYTES {
+                    can_undo = false;
+                } else {
+                    originals.push((path, text));
+                }
             }
             Err(err) => errors.push(format!("{relative}: {err}")),
         }
     }
+
+    let can_undo = can_undo && files > 0;
+    *last().lock().unwrap() = if can_undo {
+        Some(Snapshot {
+            root: root.to_path_buf(),
+            files: originals,
+        })
+    } else {
+        None
+    };
 
     Ok(serde_json::json!({
         "files": files,
         "replacements": replacements,
         "errors": errors,
         "truncated": truncated,
+        "undo": can_undo,
+    }))
+}
+
+/// Devolve ao disco o texto anterior à última substituição. O projeto precisa ser
+/// o mesmo: desfazer em outro projeto gravaria por cima de arquivos que ninguém
+/// tocou nesta sessão.
+pub(super) fn undo(root: &Path) -> Result<serde_json::Value, String> {
+    let snapshot = {
+        let mut guard = last().lock().unwrap();
+        match guard.as_ref() {
+            None => {
+                return Err("nada para desfazer: nenhuma substituição recente neste projeto".into())
+            }
+            Some(snapshot) if snapshot.root != root => {
+                return Err("a última substituição foi em outro projeto".into())
+            }
+            Some(_) => {}
+        }
+        guard.take().unwrap()
+    };
+
+    let mut restored = 0usize;
+    let mut errors: Vec<String> = Vec::new();
+    for (path, text) in snapshot.files {
+        match std::fs::write(&path, text) {
+            Ok(()) => restored += 1,
+            Err(err) => errors.push(format!("{}: {err}", path.display())),
+        }
+    }
+
+    Ok(serde_json::json!({
+        "files": restored,
+        "errors": errors,
     }))
 }
 
@@ -195,7 +266,7 @@ fn read_text(path: &Path) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{replace, run, Options};
+    use super::{replace, run, undo, Options};
 
     fn project(tag: &str) -> std::path::PathBuf {
         let dir = std::env::temp_dir().join(format!("wincode-search-{tag}-{}", std::process::id()));
@@ -211,6 +282,13 @@ mod tests {
         std::fs::create_dir_all(dir.join("node_modules")).unwrap();
         std::fs::write(dir.join("node_modules").join("x.js"), "item\n").unwrap();
         dir
+    }
+
+    /// O snapshot do desfazer é global: os testes que substituem arquivos
+    /// precisam rodar um por vez.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|err| err.into_inner())
     }
 
     fn paths(result: &serde_json::Value) -> Vec<String> {
@@ -319,6 +397,7 @@ mod tests {
 
     #[test]
     fn replace_literal_keeps_dollar_signs_verbatim() {
+        let _guard = serial();
         let dir = project("replace");
         let result = replace(&dir, "item", "$1 e texto", &Options::default()).unwrap();
 
@@ -335,6 +414,7 @@ mod tests {
 
     #[test]
     fn replace_with_regex_uses_capture_groups() {
+        let _guard = serial();
         let dir = project("replace-regex");
         let result = replace(
             &dir,
@@ -348,6 +428,57 @@ mod tests {
         assert!(std::fs::read_to_string(dir.join("src").join("main.rs"))
             .unwrap()
             .contains("let mut Item"));
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn undo_restores_the_text_of_the_last_replace() {
+        let _guard = serial();
+        let dir = project("undo");
+        let readme = dir.join("README.md");
+        let before = std::fs::read_to_string(&readme).unwrap();
+
+        let result = replace(&dir, "item", "coisa", &Options::default()).unwrap();
+        assert_eq!(result["undo"], true);
+        assert!(std::fs::read_to_string(&readme).unwrap().contains("coisa"));
+
+        let undone = undo(&dir).unwrap();
+        assert_eq!(undone["files"], 2);
+        assert_eq!(std::fs::read_to_string(&readme).unwrap(), before);
+
+        // A segunda tentativa não tem o que desfazer (e não é um pânico).
+        let error = undo(&dir).unwrap_err();
+        assert!(error.contains("nada para desfazer"), "{error}");
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn undo_refuses_another_project() {
+        let _guard = serial();
+        let dir = project("undo-root");
+        replace(&dir, "item", "coisa", &Options::default()).unwrap();
+
+        let other = dir.join("subprojeto");
+        std::fs::create_dir_all(&other).unwrap();
+        let error = undo(&other).unwrap_err();
+        assert!(error.contains("outro projeto"), "{error}");
+
+        // A recusa não consome o snapshot: desfazer no projeto certo ainda funciona.
+        assert_eq!(undo(&dir).unwrap()["files"], 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn undo_is_unavailable_when_nothing_changed() {
+        let _guard = serial();
+        let dir = project("undo-empty");
+        let result = replace(&dir, "nao-existe-aqui", "x", &Options::default()).unwrap();
+        assert_eq!(result["files"], 0);
+        assert_eq!(result["undo"], false);
+        assert!(undo(&dir).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

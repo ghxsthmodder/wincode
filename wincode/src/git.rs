@@ -1,8 +1,14 @@
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+/// Quanto de um diff volta para a interface. Um arquivo gerado pode ter milhares
+/// de linhas; o painel mostra o começo e avisa que cortou.
+const MAX_DIFF_CHARS: usize = 120_000;
+/// Um "preparar tudo" com seleção manual não precisa de mais que isso.
+const MAX_STAGE_PATHS: usize = 500;
+
 /// Resumo do repositório para a interface: nada é feito em background — o front
-/// pede o status quando abixa o painel ou muda arquivos, e a resposta vale só
+/// pede o status quando abre o painel ou muda arquivos, e a resposta vale só
 /// para aquele instante.
 pub(super) fn status(root: &Path) -> serde_json::Value {
     let Some(output) = git(root, &["status", "--porcelain=v1", "-b"]) else {
@@ -21,10 +27,14 @@ pub(super) fn status(root: &Path) -> serde_json::Value {
     value
 }
 
-/// `git add -A` + `git commit -m <mensagem>`: o painel trabalha com "tudo", sem
-/// staging por arquivo. A saída do git volta para a interface mostrar o que
-/// aconteceu (inclusive "nothing to commit").
-pub(super) fn commit(root: &Path, message: &str) -> Result<serde_json::Value, String> {
+/// Commita o índice. Com `stage_all` (nenhum arquivo preparado à mão) é o
+/// `git add -A` de antes; com arquivos preparados, o commit leva só eles, que é
+/// o que o painel mostrou como "preparado".
+pub(super) fn commit(
+    root: &Path,
+    message: &str,
+    stage_all: bool,
+) -> Result<serde_json::Value, String> {
     let message = message.trim();
     if message.is_empty() {
         return Err("escreva a mensagem do commit".into());
@@ -33,12 +43,14 @@ pub(super) fn commit(root: &Path, message: &str) -> Result<serde_json::Value, St
         return Err("mensagem de commit muito grande".into());
     }
 
-    let added = git(root, &["add", "-A"]).ok_or("git não encontrado")?;
-    if !added.ok {
-        return Err(first_line(
-            &added.stderr,
-            "não foi possível preparar as alterações",
-        ));
+    if stage_all {
+        let added = git(root, &["add", "-A"]).ok_or("git não encontrado")?;
+        if !added.ok {
+            return Err(first_line(
+                &added.stderr,
+                "não foi possível preparar as alterações",
+            ));
+        }
     }
 
     let committed = git(root, &["commit", "-m", message]).ok_or("git não encontrado")?;
@@ -48,6 +60,129 @@ pub(super) fn commit(root: &Path, message: &str) -> Result<serde_json::Value, St
         "ok": committed.ok,
         "output": text.trim(),
     }))
+}
+
+/// Prepara (`git add -A`) ou desprepara (`git restore --staged`) os caminhos
+/// pedidos pelo painel. Sempre com `--` na frente, para um nome de arquivo nunca
+/// virar opção do git.
+pub(super) fn stage(root: &Path, paths: &[String], stage: bool) -> Result<(), String> {
+    let mut clean: Vec<String> = Vec::new();
+    for path in paths {
+        let Some(path) = safe_path(path) else {
+            return Err(format!("caminho inválido para o git: {path}"));
+        };
+        clean.push(path);
+    }
+
+    if clean.is_empty() {
+        return Err("nenhum arquivo informado".into());
+    }
+    if clean.len() > MAX_STAGE_PATHS {
+        return Err(format!(
+            "arquivos demais de uma vez ({MAX_STAGE_PATHS} no máximo)"
+        ));
+    }
+
+    let mut args: Vec<&str> = Vec::new();
+    if stage {
+        args.extend(["add", "-A", "--"]);
+    } else {
+        args.extend(["restore", "--staged", "--"]);
+    }
+    args.extend(clean.iter().map(String::as_str));
+
+    let output = git(root, &args).ok_or("git não encontrado")?;
+    if output.ok {
+        return Ok(());
+    }
+
+    // `restore` só existe do git 2.23 em diante; `reset` cobre o resto. Em
+    // repositório sem nenhum commit (`HEAD` ainda não existe) o `reset` falha e o
+    // `rm --cached` é o que tira o arquivo do índice.
+    if !stage {
+        let fallback: Vec<&str> = std::iter::once("reset")
+            .chain(std::iter::once("-q"))
+            .chain(std::iter::once("HEAD"))
+            .chain(std::iter::once("--"))
+            .chain(clean.iter().map(String::as_str))
+            .collect();
+        if let Some(output) = git(root, &fallback) {
+            if output.ok {
+                return Ok(());
+            }
+        }
+
+        let unborn: Vec<&str> = std::iter::once("rm")
+            .chain(std::iter::once("--cached"))
+            .chain(std::iter::once("-r"))
+            .chain(std::iter::once("-q"))
+            .chain(std::iter::once("--"))
+            .chain(clean.iter().map(String::as_str))
+            .collect();
+        if let Some(output) = git(root, &unborn) {
+            if output.ok {
+                return Ok(());
+            }
+        }
+    }
+
+    Err(first_line(
+        &output.stderr,
+        "o git não conseguiu mudar o índice",
+    ))
+}
+
+/// Diff de um arquivo, do índice (`staged`) ou da árvore de trabalho.
+pub(super) fn diff(root: &Path, path: &str, staged: bool) -> Result<serde_json::Value, String> {
+    let path = safe_path(path).ok_or("caminho inválido para o git")?;
+
+    let mut args: Vec<&str> = vec!["diff", "--no-color", "--no-ext-diff"];
+    if staged {
+        args.push("--cached");
+    }
+    args.push("--");
+    args.push(&path);
+
+    let output = git(root, &args).ok_or("git não encontrado")?;
+    if !output.ok {
+        return Err(first_line(
+            &output.stderr,
+            "o git não conseguiu montar o diff",
+        ));
+    }
+
+    let mut text = output.stdout;
+    let mut truncated = false;
+    if text.chars().count() > MAX_DIFF_CHARS {
+        text = text.chars().take(MAX_DIFF_CHARS).collect();
+        truncated = true;
+    }
+
+    Ok(serde_json::json!({
+        "path": path,
+        "staged": staged,
+        "text": text,
+        "truncated": truncated,
+    }))
+}
+
+/// Aceita só caminho relativo à raiz, sem `..`: o `--` já impede injeção de
+/// opção, e isto impede o git de enxergar fora do projeto.
+fn safe_path(path: &str) -> Option<String> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || trimmed.len() > 1_024 {
+        return None;
+    }
+
+    let unified = trimmed.replace('\\', "/");
+    if unified.starts_with('/') || unified.contains(':') {
+        return None;
+    }
+    if unified.split('/').any(|part| part == "..") {
+        return None;
+    }
+
+    Some(unified)
 }
 
 struct Output {
@@ -147,6 +282,18 @@ fn parse_status(text: &str) -> serde_json::Value {
         changes.push(serde_json::json!({
             "path": path,
             "code": code_for(index, worktree),
+            // Para o painel separar "preparado" de "alterado no disco". O `?`
+            // (não rastreado) só faz sentido na árvore de trabalho.
+            "index": if index == ' ' || index == '?' {
+                String::new()
+            } else {
+                index.to_string()
+            },
+            "worktree": if worktree == ' ' {
+                String::new()
+            } else {
+                worktree.to_string()
+            },
         }));
     }
 
@@ -191,7 +338,7 @@ fn code_for(index: char, worktree: char) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_status;
+    use super::{parse_status, safe_path};
 
     #[test]
     fn reads_branch_and_ahead_behind() {
@@ -245,5 +392,36 @@ mod tests {
         let changes = status["changes"].as_array().unwrap();
         assert_eq!(changes[0]["code"], "D");
         assert_eq!(changes[1]["code"], "M");
+    }
+
+    #[test]
+    fn separates_index_and_worktree_for_the_panel() {
+        let status = parse_status("## main\nMM src/a.rs\nM  src/b.rs\n M src/c.rs\n?? novo.txt\n");
+        let changes = status["changes"].as_array().unwrap();
+
+        // A lista vem em ordem alfabética: novo.txt, src/a.rs, src/b.rs, src/c.rs.
+        // Não rastreado: sem índice, mas o painel mostra como novo.
+        assert_eq!(changes[0]["index"], "");
+        assert_eq!(changes[0]["worktree"], "?");
+        // MM: preparado e alterado depois; as duas seções mostram a linha.
+        assert_eq!(changes[1]["index"], "M");
+        assert_eq!(changes[1]["worktree"], "M");
+        // Preparado, sem alteração nova: preparado; não aparece na árvore.
+        assert_eq!(changes[2]["index"], "M");
+        assert_eq!(changes[2]["worktree"], "");
+        // Só árvore.
+        assert_eq!(changes[3]["index"], "");
+        assert_eq!(changes[3]["worktree"], "M");
+    }
+
+    #[test]
+    fn rejects_paths_outside_the_project() {
+        assert_eq!(safe_path("src/main.rs").as_deref(), Some("src/main.rs"));
+        assert_eq!(safe_path("src\\a\\b.rs").as_deref(), Some("src/a/b.rs"));
+        assert_eq!(safe_path("../fora.txt"), None);
+        assert_eq!(safe_path("src/../../fora.txt"), None);
+        assert_eq!(safe_path("/etc/passwd"), None);
+        assert_eq!(safe_path("C:\\Windows\\win.ini"), None);
+        assert_eq!(safe_path("   "), None);
     }
 }

@@ -110,9 +110,18 @@ fn api(
             state,
         ),
         "pathexists" => path_exists(param(query, "path"), state),
+        "undoreplace" => undo_replace(state),
         "gitstatus" => git_status(state),
         "gitcommit" => git_commit(body, state),
-        "history" => json(serde_json::Value::from(history.load())),
+        "gitstage" => git_stage(body, state),
+        "gitdiff" => git_diff(
+            param(query, "path"),
+            param(query, "staged"),
+            state,
+        ),
+        "history" => json(serde_json::Value::from(
+            history.load(&param(query, "root").unwrap_or_default()),
+        )),
         "savehistory" => save_history(body, history),
         "session" => json(sessions.load(&param(query, "root").unwrap_or_default())),
         "savesession" => match sessions.save(&param(query, "root").unwrap_or_default(), body) {
@@ -762,9 +771,9 @@ fn git_status(state: &Arc<Mutex<FsState>>) -> Response<Body> {
     json(crate::git::status(&root))
 }
 
-/// Commit de tudo o que está pendente (`git add -A` + `git commit -m`).
+/// Commit. Com arquivos preparados à mão, só eles entram; sem nada preparado, é
+/// o `git add -A` + `git commit -m` de sempre.
 fn git_commit(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
-    let message = String::from_utf8_lossy(body).to_string();
     let (selected, root) = {
         let guard = state.lock().unwrap();
         (guard.selected, guard.root.clone())
@@ -774,7 +783,97 @@ fn git_commit(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
         return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
     }
 
-    match crate::git::commit(&root, &message) {
+    // Compatível com o formato anterior (a mensagem crua no corpo).
+    let parsed: serde_json::Value = serde_json::from_slice(body)
+        .unwrap_or_else(|_| serde_json::Value::String(String::from_utf8_lossy(body).to_string()));
+    let (message, stage_all) = match &parsed {
+        serde_json::Value::String(message) => (message.clone(), true),
+        other => (
+            other
+                .get("message")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            other.get("all").and_then(|value| value.as_bool()).unwrap_or(true),
+        ),
+    };
+
+    match crate::git::commit(&root, &message, stage_all) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Prepara/desprepara arquivos no índice (`{ paths: [...], stage: true }`).
+fn git_stage(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return plain(StatusCode::BAD_REQUEST, "corpo inválido: esperado JSON");
+    };
+
+    let paths: Vec<String> = parsed
+        .get("paths")
+        .and_then(|value| value.as_array())
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    let stage = parsed
+        .get("stage")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(true);
+
+    match crate::git::stage(&root, &paths, stage) {
+        Ok(()) => json(serde_json::json!({ "ok": true })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Diff de um arquivo para o painel (`staged=1` mostra o que já está preparado).
+fn git_diff(
+    path: Option<String>,
+    staged: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
+    let Some(path) = path else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    let staged = staged
+        .map(|value| value == "1" || value == "true")
+        .unwrap_or(false);
+
+    match crate::git::diff(&root, &path, staged) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Desfaz a última substituição em arquivos (uma vez).
+fn undo_replace(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let Some(root) = project_root(state) else {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    };
+
+    match crate::search::undo(&root) {
         Ok(value) => json(value),
         Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }

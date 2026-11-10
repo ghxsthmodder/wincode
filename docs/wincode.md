@@ -93,6 +93,27 @@ acompanha as correções e melhorias pedidas.
   como texto; com regex, grupos de captura funcionam. Abas abertas sem alterações pendentes
   são relidas do disco depois da troca.
 
+## Quarta rodada (refinamento dos três recursos)
+
+- **staging e diff no painel do git** — *feito*. A lista agora separa **preparado para o
+  commit** (índice) de **alterações no disco** (árvore de trabalho); o mesmo arquivo pode
+  aparecer nas duas quando foi preparado e alterado de novo (`MM`). Cada linha tem **diff**
+  (do índice ou do disco, no mesmo `<pre>` da saída do commit) e **+**/**−** para mudar o
+  índice; o cabeçalho de cada seção prepara/desprepara tudo. O commit passou a levar só o
+  que está preparado — com o índice vazio, prepara tudo como antes. Os caminhos mandados
+  ao git são validados (relativos, sem `..`, sem unidade) e vão depois de `--`.
+- **histórico do terminal por projeto** — *feito*. `history.json` virou
+  `{ version: 2, shared: [...], projects: [{ root, entries }] }`, com a raiz normalizada
+  (caixa e barras). Trocar de projeto grava a lista do anterior e carrega a do novo;
+  comandos sem projeto vão para `shared`, que serve de semente para um projeto novo. O
+  arquivo antigo (lista pura) continua sendo lido como `shared`. Ficam os 500 comandos de
+  cada projeto e os 20 projetos usados por último (ordem de uso).
+- **desfazer a última substituição** — *feito*. `/api/replace` guarda o texto anterior dos
+  arquivos tocados (até 8 MB) e responde `undo`; `/api/undoreplace` devolve tudo de uma vez.
+  O botão **desfazer** aparece no rodapé da busca depois de uma troca e a paleta tem
+  *desfazer a última substituição em arquivos*. O snapshot é de um projeto só: desfazer
+  noutro projeto é recusado em vez de gravar por cima de arquivos que ninguém tocou.
+
 ## Como conferir
 
 - `Ctrl+Shift+P` → *novo arquivo em branco…* → digitar texto → `Ctrl+S` (o diálogo sugere
@@ -113,6 +134,11 @@ acompanha as correções e melhorias pedidas.
   depois quebrar o JSON de propósito e conferir a recusa.
 - Git: abrir um repositório e conferir o **⑂** na barra, os marcadores no explorador e um
   commit pelo painel; tentar commitar sem alterações para ver a saída do git.
+- Busca: substituir algo, conferir **desfazer** no rodapé e que os arquivos voltaram.
+- Git (staging): alterar dois arquivos, clicar **+** num deles, abrir **diff** nos dois lados
+  e commitar — só o preparado deve entrar; depois **preparar tudo** e commitar o resto.
+- Histórico: rodar um comando no projeto A, trocar para o projeto B e conferir que as setas
+  não mostram o comando do A; voltar ao A e ver a lista de novo.
 - Terminal: fechar e reabrir o editor e apertar `↑` para ver o comando anterior.
 - Busca: `Ctrl+Shift+F`, ligar **.***, procurar `fn\s+\w+`, depois **substituir…** com
   `fn $1`; conferir o aviso na barra e as abas relidas.
@@ -131,8 +157,10 @@ acompanha as correções e melhorias pedidas.
 - **Salvar como** sobrescreve um arquivo existente sem pedir confirmação.
 - A aba de um arquivo aberto fora da raiz não é reaberta por `Ctrl+Shift+T` (a leitura é
   restrita ao projeto).
-- O git depende do `git.exe` no PATH e só cobre status e commit de tudo: sem staging por
-  arquivo, diff embutido, troca de branch ou `push`/`pull`.
+- O git depende do `git.exe` no PATH e cobre status, staging e commit: sem troca de branch
+  ou `push`/`pull`, e arquivo ainda não rastreado só mostra diff depois de preparado.
 - A substituição em arquivos respeita os limites do índice: pastas ignoradas, binários e
-  arquivos acima de 1 MB não são tocados.
-- O histórico do terminal é único para a máquina, não por projeto.
+  arquivos acima de 1 MB não são tocados. O desfazer guarda só a última substituição e
+  apenas se o backup couber em 8 MB.
+- O histórico do terminal é por projeto, mas só dos 20 últimos projetos abertos; os mais
+  antigos saem do arquivo (e voltam vazios se o projeto for aberto de novo).
