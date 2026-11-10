@@ -1,3 +1,4 @@
+use crate::term::Decoder;
 use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
@@ -100,17 +101,27 @@ impl Jobs {
 
 fn read_stream<R: Read>(stream: &mut R, buffer: Arc<Mutex<String>>) {
     let mut chunk = [0u8; 8192];
+    let mut decoder = Decoder::new();
+
+    // O texto decodificado entra cru: `\r` (barras de progresso) e `\n` são
+    // interpretados pela interface, que reescreve a linha em vez de empilhar
+    // caracteres soltos.
     loop {
         match stream.read(&mut chunk) {
             Ok(0) => break,
             Ok(n) => {
-                let text = String::from_utf8_lossy(&chunk[..n])
-                    .replace("\r\n", "\n")
-                    .replace('\r', "");
-                buffer.lock().unwrap().push_str(&text);
+                let text = decoder.push(&chunk[..n]);
+                if !text.is_empty() {
+                    buffer.lock().unwrap().push_str(&text);
+                }
             }
             Err(_) => break,
         }
+    }
+
+    let tail = decoder.finish();
+    if !tail.is_empty() {
+        buffer.lock().unwrap().push_str(&tail);
     }
 }
 
@@ -124,8 +135,15 @@ fn shell(cmd: &str) -> Command {
     // pelos pipes de stdout/stderr.
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+    // `CREATE_NO_WINDOW` cria um console invisível, então `chcp 65001` vale para
+    // a saída do próprio cmd e das ferramentas que consultam a página de código
+    // do console (PowerShell 5.1, Python): o texto chega em UTF-8, com acentos.
+    // Se o console não existir, o `chcp` falha em silêncio e o decodificador
+    // (`term.rs`) cai para Latin-1.
     let mut command = Command::new("cmd.exe");
-    command.arg("/C").arg(cmd);
+    command
+        .arg("/C")
+        .arg(format!("chcp 65001>nul 2>nul & {cmd}"));
     command.creation_flags(CREATE_NO_WINDOW);
     command
 }

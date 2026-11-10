@@ -44,6 +44,7 @@ wincode/
     recent.rs               # projetos recentes da tela inicial
     session.rs              # sessão por projeto (abas, cursores, pastas abertas)
     settings.rs             # preferências do editor (JSON no config do usuário)
+    term.rs                 # decodificação da saída do terminal (UTF-8/Latin-1/UTF-16)
 ```
 
 ## Preparar o Monaco
@@ -79,15 +80,22 @@ wincode.exe C:\projetos\meu-app\src\main.rs  # abre a pasta do arquivo e o arqui
 ```
 
 Sem argumentos, o editor **não lista o diretório atual**: abre um painel inicial no lugar
-do editor, com **abrir pasta…**, **abrir arquivo…** e os **projetos recentes** (os dez
-últimos, guardados em `wincodeconfig/recent.json`). Cancelar o diálogo mantém o painel.
+do editor, com **abrir pasta…**, **abrir arquivo…**, **novo arquivo em branco…** e os
+**projetos recentes** (os dez últimos, guardados em `wincodeconfig/recent.json`).
+Cancelar o diálogo mantém o painel.
+
+**Novo arquivo em branco** cria uma aba sem caminho: o nome é pedido na hora e a pasta
+só aparece quando você salva (`Ctrl+S`), num diálogo com o caminho já preenchido. A partir
+daí a aba vira um arquivo comum — dentro do projeto, ou onde você escolher (caminho
+completo, inclusive fora da raiz).
 
 Ao escolher um **arquivo**, a pasta dele vira a raiz do projeto (para o terminal), mas o
 explorador mostra **apenas o arquivo aberto** — nada de listar a pasta inteira, como no
 VSCode. Criar arquivos e pastas continua disponível no menu e usa a pasta do arquivo,
 mas o item novo abre como aba (a árvore segue fixa no arquivo); use **abrir pasta…** no
-menu do explorador para voltar à árvore completa. Já o argumento de CLI com um arquivo
-abre esse arquivo em uma aba e entra no mesmo modo.
+menu do explorador para voltar à árvore completa. Fechar a aba do arquivo fixado também
+desfaz o modo: o explorador passa a listar a pasta em que ele estava. Já o argumento de
+CLI com um arquivo abre esse arquivo em uma aba e entra no mesmo modo.
 
 Também é possível definir a pasta por variável de ambiente:
 
@@ -96,10 +104,13 @@ set WINCODE_ROOT=C:\projetos\meu-app
 ```
 
 O menu **⋯** do explorador (e o clique direito no espaço vazio da árvore) concentra
-os cinco itens: **abrir pasta…**, **abrir arquivo…**, **recarregar explorador**,
-**novo arquivo** e **nova pasta** (sem pasta escolhida, criar apenas avisa na barra de
-status). Os dois primeiros abrem o diálogo nativo do Windows (`IFileOpenDialog`
-via crate `rfd`) e trocam a raiz do projeto sem reiniciar o editor.
+os itens: **abrir pasta…**, **abrir arquivo…**, **recarregar explorador**, **novo arquivo**,
+**nova pasta**, **novo arquivo em branco…** e, com uma pasta selecionada, **abrir terminal
+na pasta selecionada** (sem pasta escolhida, criar apenas avisa na barra de status).
+O **⋯** funciona como interruptor: o segundo clique fecha o menu, que também fecha ao
+clicar fora, ao trocar o foco da janela ou ao redimensionar. Os dois primeiros itens
+abrem o diálogo nativo do Windows (`IFileOpenDialog` via crate `rfd`) e trocam a raiz do
+projeto sem reiniciar o editor.
 
 ## Painéis
 
@@ -113,6 +124,29 @@ O explorador e o terminal podem ser redimensionados e ocultados:
   de configurações traz as opções de exibição e as medidas exatas
 
 Largura, altura e visibilidade ficam salvas no JSON de configurações.
+
+## Terminal
+
+O terminal roda comandos pelo `cmd.exe` no diretório atual e mostra a saída em
+streaming, sem janela de console. O botão **⛶** (ou **terminal em tela cheia** na paleta)
+leva o terminal para a janela inteira; `Esc` ou o mesmo botão voltam ao normal — ocultar
+com `Ctrl+J` também sai da tela cheia.
+
+A saída é **tratada antes de aparecer**, porque um pipe não é um terminal de verdade:
+
+- **codificação**: os bytes são decodificados aos poucos, guardando a sequência que ficou
+  cortada entre dois blocos. UTF-8 é o padrão; bytes isolados caem para Latin-1/Windows-1252
+  (acentos de ferramentas antigas) e UTF-16 (BOM ou padrão de bytes nulos) é reconhecido,
+  o que atende o `powershell.exe` redirecionado. Antes disso, acentos viravam "�" ou
+  desapareciam quando a sequência caía na fronteira de duas leituras
+- o comando é precedido de `chcp 65001`, então `cmd.exe`, PowerShell 5.1 e Python escrevem
+  em UTF-8 em vez da página de código do console
+- **códigos de controle**: cores e movimentos de cursor (`ESC [ … m`, `ESC [ K`, OSC de
+  título/link) são interpretados e descartados — sem `←[32m` na tela; `\r` volta a coluna
+  para o início (barras de progresso reescrevem a mesma linha em vez de empilhar),
+  `\b` e `ESC [ K` apagam o trecho correspondente e `\n` fecha a linha
+- a saída é mantida como texto (nada de cores): o objetivo é manter o conteúdo legível
+  em qualquer tema
 
 ## Recarregamento automático
 
@@ -131,7 +165,8 @@ Cada arquivo aberto vira uma aba acima do editor:
 
 - clique troca para o arquivo (sem reler o disco, mantendo edições não salvas)
 - **×** (ou clique do meio) fecha a aba; se houver alterações não salvas, um diálogo pede confirmação
-- **●** marca a aba com alterações pendentes e acompanha o digitar
+- **●** marca a aba com alterações pendentes e acompanha o digitar (o mesmo vale para
+  arquivos criados em branco, que ainda não têm caminho)
 - renomear atualiza o nome/caminho da aba; excluir fecha as abas afetadas;
   fechar a aba ativa passa para a última aberta, e a última fechada deixa o editor vazio
 
@@ -182,9 +217,14 @@ cujo caminho o contém.
 No **Explorador**, use o menu **⋯** no topo do painel (abrir pasta/arquivo, recarregar,
 novo arquivo e nova pasta) ou o **clique direito** em qualquer item:
 
+- **abrir terminal aqui** — muda o terminal para a pasta do item e o traz à frente
 - **novo arquivo** e **nova pasta** — criam dentro da pasta clicada (ou da pasta selecionada)
+- **copiar nome** e **copiar caminho** — vão para a área de transferência
 - **renomear** — mantém o arquivo aberto no editor, inclusive alterações não salvas
 - **excluir** — pede confirmação e remove pastas com todo o conteúdo (sem lixeira)
+
+Cada pasta também mostra um botão **›_** ao passar o mouse: um clique esquerdo abre o
+terminal já dentro dela, sem passar pelo menu.
 
 Tudo passa pela mesma validação do backend: nomes sem `/ \ : * ? " < > |`,
 proibido sobrescrever item existente e nenhuma operação fora da pasta do projeto.
@@ -271,7 +311,8 @@ Comandos disponíveis:
 
 - **arquivo**: abrir rapidamente (Ctrl+P), buscar em arquivos (Ctrl+Shift+F), salvar,
   renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
-- **projeto**: abrir pasta/arquivo, mostrar/ocultar explorador, abas e terminal, focar e limpar o terminal
+- **projeto**: abrir pasta/arquivo, criar arquivo em branco, mostrar/ocultar explorador,
+  abas e terminal, terminal em tela cheia, focar e limpar o terminal
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
   ícones da árvore e salvamento automático; restaurar padrões
@@ -294,7 +335,8 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+,` — abre/fecha as configurações (`Esc` também fecha)
 - `Ctrl+Shift+P` — abre a paleta de comandos (`Esc` também fecha)
 - `Ctrl+B` — mostra/oculta o explorador
-- `Ctrl+J` — mostra/oculta o terminal
+- `Ctrl+J` — mostra/oculta o terminal (sai da tela cheia, se estiver nela)
+- `Esc` — fecha menus, diálogos e a paleta, e sai do terminal em tela cheia
 
 Os atalhos do navegador embutido (recarregar, imprimir, zoom da página) ficam desligados
 na janela, então combinações como `Ctrl+=` chegam ao editor em vez de ampliar a interface.
@@ -335,8 +377,8 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - A troca de projeto fecha as abas; o diálogo oferece salvar ou descartar, e a sessão
   (abas, cursores, pastas expandidas) volta ao reabrir — mas o conteúdo descartado não.
 - No modo arquivo único, abrir outros arquivos (pelo terminal ou pelo `Ctrl+P`) cria abas
-  normalmente, mas o explorador continua mostrando só o arquivo escolhido; use
-  **abrir pasta…** para voltar à árvore do projeto.
+  normalmente, mas o explorador continua mostrando só o arquivo escolhido; fechar a aba
+  dele ou usar **abrir pasta…** volta à árvore do projeto.
 - A busca é textual e sem expressões regulares; para padrões complexos, use o terminal
   (`findstr`/`rg`).
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
@@ -344,5 +386,11 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.
   Por rodarem sem janela de console, programas que dependem de um terminal real (editores
   de texto interativos, `pause`, prompts de senha) não funcionam.
+- A saída do terminal é texto puro: cores de ferramentas que ignoram o `chcp 65001` são
+  descartadas, e uma página de código diferente de UTF-8/Latin-1 (ex.: `chcp 850` digitado
+  à mão) pode trocar alguns acentos.
+- Um arquivo em branco salvo **fora** da raiz do projeto continua editável e salva por
+  `/api/saveas`; ele não entra na árvore, no índice do `Ctrl+P` nem no recarregamento
+  automático (que opera dentro do projeto).
 - Alvos não-Windows compilam apenas como conveniência de desenvolvimento e exigem
   `pkg-config`, `libgtk-3-dev` e `libwebkit2gtk-4.1-dev`.

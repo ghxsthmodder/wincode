@@ -18,6 +18,8 @@
     --ui-font-size: 13px;
     --sidebar-width: 250px;
     --term-font-size: 12.5px;
+    --scrollbar: rgba(127,127,127,.42);
+    --scrollbar-hover: rgba(127,127,127,.7);
   }
 
   /* As cores da interface vêm de JS (tema do editor ou tema claro/escuro fixo).
@@ -79,6 +81,8 @@
     line-height: 15px; text-transform: none; letter-spacing: 0; cursor: pointer;
   }
   .panel-title button:hover { background: rgba(255,255,255,.07); color: var(--text); }
+  /* O ⋯ fica marcado enquanto o menu está aberto: clicar de novo fecha. */
+  .panel-title button.on { background: rgba(127,127,127,.18); border-color: var(--accent); color: var(--text); }
   .tree { flex: 1; overflow: auto; padding: 4px 0; }
   .row {
     display: flex; align-items: center; gap: 6px;
@@ -91,6 +95,14 @@
   .row .fticon { width: 15px; height: 15px; flex: 0 0 auto; }
   .row .name { overflow: hidden; text-overflow: ellipsis; }
   .row.dir .name { color: var(--accent); }
+  /* Ação rápida da pasta: abrir o terminal já nela (some quando não é hover). */
+  .row .rowact {
+    flex: 0 0 auto; margin-left: auto; padding: 0 5px; border: 0; border-radius: 3px;
+    background: transparent; color: var(--muted); font: inherit; font-size: 10px;
+    line-height: 16px; cursor: pointer; opacity: 0;
+  }
+  .row:hover .rowact, .row .rowact:focus-visible { opacity: 1; }
+  .row .rowact:hover { background: rgba(127,127,127,.22); color: var(--text); }
 
   .main { display: flex; flex-direction: column; min-height: 0; background: var(--surface); }
   .editor-head {
@@ -148,6 +160,12 @@
     background: transparent; border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer;
   }
+  /* Tela cheia: o terminal cobre a janela toda sem tocar no layout do editor. */
+  .terminal.fullscreen {
+    position: fixed; inset: 0; z-index: 60; height: auto;
+    flex: 1 1 auto; border-top: 0;
+  }
+  body.term-full .main > .resize-handle.vert { display: none; }
   /* O prompt é a última linha do buffer, não uma barra fixa: rola junto. */
   .termout {
     flex: 1; overflow: auto; padding: 8px 12px; margin: 0; min-height: 0;
@@ -247,18 +265,23 @@
     display: flex; flex-direction: column;
   }
   .settings .body { overflow: auto; padding-right: 6px; }
-  /* Scrollbar no tom do editor (slider discreto, trilho transparente). */
-  .settings .body::-webkit-scrollbar { width: 10px; }
-  .settings .body::-webkit-scrollbar-track { background: transparent; }
-  .settings .body::-webkit-scrollbar-thumb {
-    background: var(--border); background-clip: padding-box;
+  /* Barras de rolagem no tom do tema. Sem isso o WebView2 usa a cor de
+     destaque do Windows (que pode ser um vermelho) no explorador e no terminal. */
+  * { scrollbar-width: thin; scrollbar-color: var(--scrollbar) transparent; }
+  *::-webkit-scrollbar { width: 10px; height: 10px; }
+  *::-webkit-scrollbar-track { background: transparent; }
+  *::-webkit-scrollbar-thumb {
+    background: var(--scrollbar); background-clip: padding-box;
     border: 2px solid transparent; border-radius: 6px;
   }
-  .settings .body::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--text) 26%, transparent);
-    background-clip: padding-box;
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--scrollbar-hover); background-clip: padding-box;
   }
-  .settings .body::-webkit-scrollbar-corner { background: transparent; }
+  *::-webkit-scrollbar-corner { background: transparent; }
+  /* O Monaco desenha as próprias barras: recebem a mesma cor do tema. */
+  .monaco-editor .scrollbar > .slider { background: var(--scrollbar) !important; }
+  .monaco-editor .scrollbar > .slider:hover,
+  .monaco-editor .scrollbar > .slider.active { background: var(--scrollbar-hover) !important; }
   .settings .actions .spacer { flex: 1; }
 
   /* Paleta de comandos: mesmo overlay/dialog das configurações. */
@@ -408,6 +431,9 @@
                   <button id="welcomefile" type="button" class="welcome-action">
                     <span class="welcome-icon">📄</span> abrir arquivo…
                   </button>
+                  <button id="welcomeblank" type="button" class="welcome-action">
+                    <span class="welcome-icon">✏️</span> novo arquivo em branco…
+                  </button>
                 </section>
                 <section>
                   <h2>projetos recentes</h2>
@@ -427,6 +453,7 @@
             <span>terminal</span>
             <span id="shellcwd" class="cwd dim"></span>
             <span class="spacer"></span>
+            <button id="btntermfull" title="Terminal em tela cheia (Esc sai)">⛶</button>
             <button id="btnclear">limpar</button>
           </div>
           <div id="termout" class="termout">
@@ -845,6 +872,10 @@ function uiPalette(theme) {
     accent: theme.accent,
     accent2: theme.accent2,
     danger: theme.danger || (light ? '#cd3131' : '#f38ba8'),
+    // Barras de rolagem: meio-termo entre o texto e o fundo, sem a cor de
+    // destaque do Windows que o WebView2 aplicaria por conta própria.
+    scrollbar: rgba(theme.muted, light ? 0.55 : 0.45),
+    'scrollbar-hover': rgba(theme.muted, 0.8),
   };
 }
 
@@ -880,9 +911,13 @@ function editorColors(theme) {
     'editorBracketMatch.border': theme.accent,
     'editor.findMatchBackground': rgba(theme.accent2, 0.35),
     'editor.findMatchHighlightBackground': rgba(theme.accent2, 0.18),
-    'scrollbarSlider.background': rgba(theme.fg, 0.14),
-    'scrollbarSlider.hoverBackground': rgba(theme.fg, 0.24),
-    'scrollbarSlider.activeBackground': rgba(theme.fg, 0.32),
+    'scrollbar.shadow': '#00000000',
+    'scrollbarSlider.background': rgba(theme.muted, 0.42),
+    'scrollbarSlider.hoverBackground': rgba(theme.muted, 0.66),
+    'scrollbarSlider.activeBackground': rgba(theme.muted, 0.85),
+    'minimapSlider.background': rgba(theme.fg, 0.08),
+    'minimapSlider.hoverBackground': rgba(theme.fg, 0.14),
+    'minimapSlider.activeBackground': rgba(theme.fg, 0.2),
     'minimap.background': theme.bg,
   };
 }
@@ -1378,7 +1413,30 @@ function toggleSetting(key) {
 }
 
 const toggleSidebar = () => toggleSetting('showSidebar');
-const toggleTerminal = () => toggleSetting('showTerminal');
+
+function exitTerminalFullscreen() {
+  if (!els.terminal.classList.contains('fullscreen')) return;
+  els.terminal.classList.remove('fullscreen');
+  document.body.classList.remove('term-full');
+  $('btntermfull').classList.remove('on');
+}
+
+const toggleTerminal = () => {
+  // Ocultar o terminal em tela cheia deixaria a janela coberta por nada.
+  if (settings.showTerminal) exitTerminalFullscreen();
+  toggleSetting('showTerminal');
+};
+
+/** Terminal em tela cheia: cobre a janela até Esc (ou o mesmo botão). */
+function toggleTerminalFullscreen() {
+  const on = !els.terminal.classList.contains('fullscreen');
+  if (on && !settings.showTerminal) setSetting('showTerminal', true);
+  els.terminal.classList.toggle('fullscreen', on);
+  document.body.classList.toggle('term-full', on);
+  $('btntermfull').classList.toggle('on', on);
+  setStatus(on ? 'terminal em tela cheia — Esc para sair' : 'terminal normal');
+  focusTerminal();
+}
 
 function resetSettings() {
   settings = { ...SETTINGS_DEFAULTS };
@@ -1470,6 +1528,7 @@ function paletteCommands() {
     { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
     { title: 'buscar em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
     { title: 'abrir arquivo…', run: chooseFile },
+    { title: 'novo arquivo em branco…', run: newBlankFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
     { title: 'recarregar árvore de arquivos', run: () => refreshTree() },
     // Criar só faz sentido com uma pasta aberta.
@@ -1483,6 +1542,7 @@ function paletteCommands() {
     { title: `${settings.showTerminal ? 'ocultar' : 'mostrar'} terminal`, hint: 'Ctrl+J', run: toggleTerminal },
     { title: `${settings.showTabs ? 'ocultar' : 'mostrar'} abas de arquivo`, run: () => toggleSetting('showTabs') },
     { title: 'focar terminal', run: () => focusTerminal() },
+    { title: 'terminal em tela cheia', run: toggleTerminalFullscreen },
     { title: 'limpar terminal', hint: 'Ctrl+L', run: () => { clearTerminal(); focusTerminal(); } },
     {
       title: `${settings.minimap ? 'ocultar' : 'mostrar'} minimapa`,
@@ -1929,18 +1989,21 @@ function startEditor() {
 // ---------------------------------------------------------------------------
 // Abas dos arquivos abertos
 // ---------------------------------------------------------------------------
+/** Nome da aba: arquivo novo ainda sem caminho mostra o nome digitado. */
+const entryName = (path, entry) => (entry?.blank ? entry.name : baseName(path));
+
 /** Monta a barra de abas a partir dos modelos abertos (a ordem do Map é a ordem de abertura). */
 function renderTabs() {
   els.tabs.innerHTML = '';
 
   for (const [path, entry] of models) {
     const dirty = entry.model.getValue() !== entry.saved;
-    const name = baseName(path);
+    const name = entryName(path, entry);
 
     const tab = document.createElement('div');
     tab.className = 'tabfile';
     tab.dataset.path = path;
-    tab.title = path;
+    tab.title = entry.blank ? `${entry.name} (não salvo)` : path;
     tab.classList.toggle('active', path === activePath);
     tab.classList.toggle('dirty', dirty);
 
@@ -2008,7 +2071,7 @@ function selectFile(path) {
 
   activePath = path;
   view.setModel(entry.model);
-  els.statusfile.textContent = path;
+  els.statusfile.textContent = entry.blank ? `${entry.name} (não salvo)` : path;
   state.selectedDir = parentOf(path);
   view.focus();
   updateDirty();
@@ -2022,8 +2085,8 @@ async function closeFile(path) {
 
   if (entry.model.getValue() !== entry.saved) {
     const ok = await showDialog({
-      title: `Fechar ${baseName(path)}`,
-      message: `${path}\n\nAs alterações não salvas serão perdidas.`,
+      title: `Fechar ${entryName(path, entry)}`,
+      message: `${entry.blank ? entry.name : path}\n\nAs alterações não salvas serão perdidas.`,
       confirmLabel: 'fechar sem salvar',
       danger: true,
     });
@@ -2048,11 +2111,18 @@ async function closeFile(path) {
   }
 
   entry.model.dispose();
+
+  // Em modo arquivo único o explorador mostrava só este arquivo: fechou a aba,
+  // ele sai da árvore (e a pasta volta a ser listada).
+  if (state.singleFile && normalizePath(state.singleFile) === normalizePath(path)) {
+    await releasePinnedFile();
+  }
+
   renderTabs();
   updateDirty();
   highlightActiveRow();
   scheduleSessionSave();
-  setStatus(`fechado ${baseName(path)}`);
+  setStatus(`fechado ${entryName(path, entry)}`);
 }
 
 function updateDirty() {
@@ -2060,7 +2130,7 @@ function updateDirty() {
   const dirty = !!entry && entry.model.getValue() !== entry.saved;
   refreshTabStates();
 
-  const name = activePath ? baseName(activePath) : '';
+  const name = activePath ? entryName(activePath, models.get(activePath)) : '';
   const label = name || baseName(state.root);
   const glyph = titleGlyph(activePath ? iconIdFor(name, false) : FOLDER_ICON);
   document.title = `${glyph} ${label} — Wincode${dirty ? ' •' : ''}`;
@@ -2104,17 +2174,29 @@ async function openFile(requestedPath) {
   }
 }
 
+/**
+ * Grava o texto no caminho da aba. Arquivos salvos fora da raiz do projeto
+ * (escolhidos no "salvar como") passam por `/api/saveas`, que aceita caminho
+ * completo; os demais usam `/api/write`, restrito ao projeto.
+ */
+async function writeEntry(path, entry, text) {
+  const route = entry.outside ? '/api/saveas' : '/api/write';
+  const res = await fetch(api(route, { path }), { method: 'POST', body: text });
+  if (!res.ok) throw new Error((await res.text()).trim());
+}
+
 async function saveActiveFile() {
   if (!activePath) return;
   const entry = models.get(activePath);
   if (!entry) return;
+  if (entry.blank) {
+    await saveBlankFile(activePath, entry);
+    return;
+  }
   try {
-    const res = await fetch(api('/api/write', { path: activePath }), {
-      method: 'POST',
-      body: entry.model.getValue(),
-    });
-    if (!res.ok) throw new Error((await res.text()).trim());
-    entry.saved = entry.model.getValue();
+    const text = entry.model.getValue();
+    await writeEntry(activePath, entry, text);
+    entry.saved = text;
     updateDirty();
     setStatus(`salvo ${baseName(activePath)}`);
   } catch (err) {
@@ -2130,9 +2212,19 @@ async function saveAllFiles() {
     const text = entry.model.getValue();
     if (text === entry.saved) continue;
 
+    // Arquivo novo: o destino é escolhido agora, uma aba por vez.
+    if (entry.blank) {
+      if (!(await saveBlankFile(path, entry))) {
+        updateDirty();
+        setStatus('salvamento interrompido: arquivo novo ainda sem destino');
+        return;
+      }
+      saved += 1;
+      continue;
+    }
+
     try {
-      const res = await fetch(api('/api/write', { path }), { method: 'POST', body: text });
-      if (!res.ok) throw new Error((await res.text()).trim());
+      await writeEntry(path, entry, text);
       entry.saved = text;
       saved += 1;
     } catch (err) {
@@ -2210,6 +2302,28 @@ const sameOrInside = (path, base) => {
 
 function closeMenu() {
   document.querySelectorAll('.ctxmenu').forEach((node) => node.remove());
+  $('btnnewmenu').classList.remove('on');
+}
+
+/** Copia sem `prompt()`: a API de clipboard pode depender da origem do WebView. */
+async function copyText(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.append(area);
+    area.select();
+    const copied = document.execCommand('copy');
+    area.remove();
+    if (!copied) {
+      setStatus('não foi possível copiar');
+      return;
+    }
+  }
+  setStatus(`${what || 'texto'} copiado: ${text}`);
 }
 
 function showMenu(x, y, entries) {
@@ -2375,9 +2489,113 @@ function workspaceMenuEntries() {
     '-',
     { label: 'novo arquivo', run: create('file') },
     { label: 'nova pasta', run: create('dir') },
+    { label: 'novo arquivo em branco…', run: newBlankFile },
   );
 
+  if (hasFolder) {
+    entries.push(
+      '-',
+      {
+        label: 'abrir terminal na pasta selecionada',
+        run: () => openTerminalAt(state.selectedDir || state.root),
+      },
+    );
+  }
+
   return entries;
+}
+
+/** Contador das abas sem caminho ("novo:1", "novo:2"…). */
+let blankSeq = 0;
+
+/**
+ * Novo arquivo em branco: o buffer nasce sem caminho e a pasta só é perguntada
+ * no salvamento — dá para começar a rascunhar antes de decidir onde gravar.
+ */
+async function newBlankFile() {
+  if (!view) return;
+
+  const name = await showDialog({
+    title: 'Novo arquivo em branco',
+    message: 'Ele só vai para o disco quando você salvar (Ctrl+S).',
+    value: 'novo.txt',
+    confirmLabel: 'criar',
+  });
+  if (!name) return;
+  if (!validName(name)) {
+    setStatus('nome inválido: não use \\ / : * ? " < > |');
+    return;
+  }
+
+  const key = `novo:${++blankSeq}`;
+  const model = window.monaco.editor.createModel('', languageFor(name));
+  applyModelOptions(model);
+  models.set(key, { model, saved: null, name, blank: true });
+
+  activePath = key;
+  view.setModel(model);
+  view.focus();
+  els.statusfile.textContent = `${name} (não salvo)`;
+  renderTabs();
+  updateDirty();
+  setStatus(`novo arquivo: ${name} — Ctrl+S para escolher onde salvar`);
+}
+
+/**
+ * Grava um arquivo que nasceu em branco. O caminho digitado é relativo à raiz
+ * do projeto ou completo (aí pode ficar fora dela, escolha do usuário).
+ * `false` mantém a aba como está.
+ */
+async function saveBlankFile(key, entry) {
+  const suggested = state.root && !state.selectionRequired
+    ? joinPath(state.root, entry.name)
+    : entry.name;
+
+  const target = await showDialog({
+    title: 'Salvar arquivo',
+    message: 'Pasta e nome do arquivo. Também aceita um caminho completo.',
+    value: suggested,
+    confirmLabel: 'salvar',
+  });
+  if (!target) return false;
+
+  try {
+    const result = await apiJson(api('/api/saveas', { path: target }), {
+      method: 'POST',
+      body: entry.model.getValue(),
+    });
+    const path = result.path;
+    const wasActive = activePath === key;
+
+    // Mesmo modelo, caminho novo: a aba troca de chave sem recarregar o texto.
+    models.delete(key);
+    entry.blank = false;
+    entry.saved = entry.model.getValue();
+    entry.name = baseName(path);
+    entry.outside = !sameOrInside(path, state.root);
+    models.set(path, entry);
+
+    if (wasActive) {
+      activePath = path;
+      els.statusfile.textContent = path;
+    }
+    state.fileIndex = null;
+
+    // Fora do projeto, a árvore não tem onde mostrar o arquivo.
+    if (sameOrInside(path, state.root)) {
+      state.selectedDir = parentOf(path);
+      await refreshTree();
+    }
+
+    renderTabs();
+    updateDirty();
+    scheduleSessionSave();
+    setStatus(`salvo ${baseName(path)}`);
+    return true;
+  } catch (err) {
+    setStatus('erro ao salvar: ' + err.message);
+    return false;
+  }
 }
 
 async function createEntry(dir, kind) {
@@ -2816,6 +3034,22 @@ function makeNode(item, depth) {
   name.title = item.path;
 
   row.append(caret, icon, name);
+
+  // Ação rápida (clique esquerdo) para trabalhar já dentro desta pasta.
+  if (item.dir) {
+    const quick = document.createElement('button');
+    quick.className = 'rowact';
+    quick.type = 'button';
+    quick.textContent = '›_';
+    quick.title = 'abrir terminal nesta pasta';
+    quick.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      openTerminalAt(item.path);
+    });
+    row.append(quick);
+  }
+
   group.append(row);
 
   const children = document.createElement('div');
@@ -2871,7 +3105,7 @@ function makeNode(item, depth) {
     event.stopPropagation();
     const dir = item.dir ? item.path : parentOf(item.path);
     state.selectedDir = dir;
-    const entries = [];
+    const entries = [{ label: 'abrir terminal aqui', run: () => openTerminalAt(dir) }, '-'];
     if (!state.singleFile) {
       entries.push(
         { label: 'novo arquivo', run: () => createEntry(dir, 'file') },
@@ -2880,6 +3114,9 @@ function makeNode(item, depth) {
       );
     }
     entries.push(
+      { label: 'copiar nome', run: () => copyText(item.name, 'nome') },
+      { label: 'copiar caminho', run: () => copyText(item.path, 'caminho') },
+      '-',
       { label: 'renomear', run: () => renameEntry(item) },
       { label: 'excluir', danger: true, run: () => deleteEntry(item) },
     );
@@ -2898,6 +3135,21 @@ async function restoreExpanded(group) {
   for (const child of Array.from(node.children.children)) {
     if (child.editorNode) await restoreExpanded(child);
   }
+}
+
+/**
+ * O arquivo aberto sozinho saiu das abas: o explorador deixa de mostrá-lo e
+ * volta a listar a pasta em que ele estava.
+ */
+async function releasePinnedFile() {
+  state.singleFile = '';
+  els.rootlabel.textContent = workspaceLabel();
+  try {
+    await apiJson('/api/unpin', { method: 'POST' });
+  } catch {
+    // Sem a confirmação do backend a árvore só não é atualizada; nada quebra.
+  }
+  await refreshTree();
 }
 
 async function refreshTree() {
@@ -2955,7 +3207,7 @@ function watchPaths() {
   if (state.root && !state.selectionRequired && !state.singleFile) paths.add(state.root);
   if (state.singleFile) paths.add(state.singleFile);
   for (const path of state.expanded) paths.add(path);
-  for (const path of models.keys()) paths.add(path);
+  for (const [path, entry] of models) if (!entry.blank) paths.add(path);
   return Array.from(paths).slice(0, 200);
 }
 
@@ -3044,12 +3296,15 @@ async function saveSession() {
   const payload = {
     version: 1,
     active: activePath || '',
-    tabs: Array.from(models, ([path, entry]) => ({
-      path,
-      line: entry.cursor?.line || 1,
-      column: entry.cursor?.column || 1,
-      scroll: Math.max(0, Math.round(entry.scrollTop || 0)),
-    })),
+    // Arquivos novos sem caminho não podem ser restaurados.
+    tabs: Array.from(models)
+      .filter(([, entry]) => !entry.blank)
+      .map(([path, entry]) => ({
+        path,
+        line: entry.cursor?.line || 1,
+        column: entry.cursor?.column || 1,
+        scroll: Math.max(0, Math.round(entry.scrollTop || 0)),
+      })),
     expanded: Array.from(state.expanded).slice(0, 200),
   };
 
@@ -3143,7 +3398,7 @@ async function confirmSwitch() {
   const dirty = dirtyTabs();
   if (!dirty.length) return true;
 
-  const names = dirty.slice(0, 6).map((path) => '· ' + baseName(path)).join('\n');
+  const names = dirty.slice(0, 6).map((path) => '· ' + entryName(path, models.get(path))).join('\n');
   const more = dirty.length > 6 ? `\n… e mais ${dirty.length - 6}` : '';
   const choice = await showDialog({
     title: 'Abas com alterações',
@@ -3357,10 +3612,158 @@ async function chooseFile() {
 // ---------------------------------------------------------------------------
 // Terminal
 // ---------------------------------------------------------------------------
+// A saída chega de um pipe, sem TTY: ferramentas mandam cores (ESC), títulos
+// (OSC), barras de progresso que reescrevem a mesma linha com \r e até UTF-16.
+// Despejar os bytes crus mostrava "←[32m" e "�" no lugar do texto, então a
+// saída é interpretada: cores e movimentos de cursor saem, \r volta a coluna
+// para o começo e o texto é escrito sobre a linha em edição.
+const term = {
+  line: [],     // caracteres da linha em edição
+  col: 0,       // coluna onde o próximo caractere entra
+  node: null,   // nó de texto que espelha `line`
+  escape: '',   // sequência de escape começada na leitura anterior
+};
+
+/** Espaço para uma sequência de escape que ainda não terminou (links OSC são grandes). */
+const TERM_ESCAPE_LIMIT = 4096;
+
+function termRenderLine() {
+  if (!term.node) {
+    if (!term.line.length) return;
+    term.node = document.createTextNode('');
+    els.termout.insertBefore(term.node, els.inputline);
+  }
+  const text = term.line.join('');
+  if (term.node.data !== text) term.node.data = text;
+}
+
+function termBreakLine() {
+  termRenderLine();
+  term.node = null;
+  term.line = [];
+  term.col = 0;
+  els.termout.insertBefore(document.createTextNode('\n'), els.inputline);
+}
+
+function termPut(char) {
+  if (term.col < term.line.length) term.line[term.col] = char;
+  else term.line.push(char);
+  term.col += 1;
+}
+
+/** Aplica `CSI K` (apagar da coluna atual até o fim da linha), usado por progressos. */
+function termEraseLine(params) {
+  const mode = params.trim();
+  if (mode === '2') {
+    term.line = [];
+    term.col = 0;
+    return;
+  }
+  if (mode === '1') {
+    for (let index = 0; index <= term.col && index < term.line.length; index += 1) {
+      term.line[index] = ' ';
+    }
+    return;
+  }
+  term.line.length = Math.min(term.line.length, term.col);
+}
+
+const isCsiParam = (char) => {
+  const code = char.charCodeAt(0);
+  return (code >= 0x30 && code <= 0x3f) || (code >= 0x20 && code <= 0x2f);
+};
+
+/** Consome uma sequência de escape e devolve o índice seguinte (-1: incompleta). */
+function termSkipEscape(data, at) {
+  const kind = data[at + 1];
+  if (kind === undefined) return -1;
+
+  if (kind === '[') {
+    let index = at + 2;
+    while (index < data.length && isCsiParam(data[index])) index += 1;
+    if (index >= data.length) return -1;
+    const final = data[index];
+    if (final < '@' || final > '~') return index; // CSI malformado: descarta o começo
+    if (final === 'K') termEraseLine(data.slice(at + 2, index));
+    return index + 1;
+  }
+
+  if (kind === ']') {
+    let index = at + 2;
+    while (index < data.length) {
+      if (data[index] === '\x07') return index + 1;
+      if (data[index] === '\x1b') {
+        if (data[index + 1] === undefined) return -1;
+        return data[index + 1] === '\\' ? index + 2 : index;
+      }
+      index += 1;
+    }
+    return -1;
+  }
+
+  // Designação de conjunto de caracteres: ESC ( B, ESC ) 0…
+  if (kind === '(' || kind === ')' || kind === '*' || kind === '+' || kind === '#') {
+    return at + 3 <= data.length ? at + 3 : -1;
+  }
+
+  return at + 2; // ESC seguido de um único caractere (ESC =, ESC 7…)
+}
+
 function termWrite(text) {
   if (!text) return;
-  // O texto entra antes da linha de comando, como em um terminal de verdade.
-  els.termout.insertBefore(document.createTextNode(text), els.inputline);
+
+  const data = term.escape + text;
+  term.escape = '';
+  let index = 0;
+
+  while (index < data.length) {
+    const char = data[index];
+
+    if (char === '\x1b') {
+      const next = termSkipEscape(data, index);
+      if (next < 0) {
+        term.escape = data.slice(index, index + TERM_ESCAPE_LIMIT);
+        break;
+      }
+      index = next;
+      continue;
+    }
+
+    if (char === '\n') {
+      termBreakLine();
+      index += 1;
+      continue;
+    }
+    if (char === '\r') {
+      term.col = 0;
+      index += 1;
+      continue;
+    }
+    if (char === '\b') {
+      if (term.col > 0) term.col -= 1;
+      index += 1;
+      continue;
+    }
+
+    const code = char.charCodeAt(0);
+    if (code === 0x09) {
+      termPut('\t');
+      index += 1;
+      continue;
+    }
+    // BEL, NUL e os demais controles não têm representação na tela.
+    if (code < 0x20 || code === 0x7f || (code >= 0x80 && code <= 0x9f)) {
+      index += 1;
+      continue;
+    }
+
+    // Um par surrogado entra inteiro, senão viraria dois quadradinhos.
+    const size = code >= 0xd800 && code <= 0xdbff && index + 1 < data.length ? 2 : 1;
+    termPut(data.slice(index, index + size));
+    index += size;
+  }
+
+  termRenderLine();
   els.termout.scrollTop = els.termout.scrollHeight;
 }
 
@@ -3368,6 +3771,10 @@ function clearTerminal() {
   for (const node of Array.from(els.termout.childNodes)) {
     if (node !== els.inputline) node.remove();
   }
+  term.line = [];
+  term.col = 0;
+  term.node = null;
+  term.escape = '';
   els.termout.scrollTop = 0;
 }
 
@@ -3386,9 +3793,20 @@ async function changeDir(target) {
     state.cwd = cwd;
     updatePrompt();
     termWrite(cwd + '\n');
+    return cwd;
   } catch (err) {
     termWrite(`erro: ${err.message}\n`);
+    setStatus('erro ao mudar de pasta: ' + err.message);
+    return '';
   }
+}
+
+/** Abre (se preciso) o terminal já apontado para uma pasta do explorador. */
+async function openTerminalAt(dir) {
+  if (!settings.showTerminal) setSetting('showTerminal', true);
+  const cwd = await changeDir(dir);
+  if (cwd) setStatus('terminal em ' + shortPath(cwd));
+  focusTerminal();
 }
 
 async function runCommandLine(input) {
@@ -3398,6 +3816,8 @@ async function runCommandLine(input) {
   state.history.push(cmd);
   state.historyIndex = state.history.length;
   state.historyDraft = '';
+  // Saída anterior sem quebra de linha: o prompt começa em linha própria.
+  if (term.line.length) termBreakLine();
   termWrite(`${promptText()} ${cmd}\n`);
 
   const lower = cmd.toLowerCase();
@@ -3506,13 +3926,22 @@ function bindTerminal() {
     clearTerminal();
     focusTerminal();
   });
+  $('btntermfull').addEventListener('click', toggleTerminalFullscreen);
   $('btntogglesidebar').addEventListener('click', toggleSidebar);
   $('btntoggleterminal').addEventListener('click', toggleTerminal);
   $('welcomefolder').addEventListener('click', chooseFolder);
   $('welcomefile').addEventListener('click', chooseFile);
+  $('welcomeblank').addEventListener('click', newBlankFile);
 
+  // O ⋯ é um interruptor: o segundo clique fecha o menu (que também fecha
+  // ao clicar fora, trocar de foco ou redimensionar a janela).
   $('btnnewmenu').addEventListener('click', (event) => {
+    if (document.querySelector('.ctxmenu')) {
+      closeMenu();
+      return;
+    }
     const rect = event.currentTarget.getBoundingClientRect();
+    event.currentTarget.classList.add('on');
     showMenu(rect.left, rect.bottom + 4, workspaceMenuEntries());
   });
 
@@ -3524,7 +3953,9 @@ function bindTerminal() {
   });
 
   document.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('.ctxmenu')) closeMenu();
+    // O clique no próprio ⋯ é tratado no handler dele (abrir/fechar).
+    if (event.target.closest('.ctxmenu') || event.target.closest('#btnnewmenu')) return;
+    closeMenu();
   });
   window.addEventListener('blur', closeMenu);
   window.addEventListener('resize', closeMenu);
@@ -3541,6 +3972,7 @@ function bindTerminal() {
       closeMenu();
       closeSettings();
       closePalette();
+      if (els.terminal.classList.contains('fullscreen')) toggleTerminalFullscreen();
     }
     if (ctrl && !event.altKey && event.key === ',') {
       event.preventDefault();

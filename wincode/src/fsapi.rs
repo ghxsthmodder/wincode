@@ -78,6 +78,11 @@ impl FsState {
         (root == dir).then(|| file.clone())
     }
 
+    /// Fechar o arquivo aberto sozinho devolve o explorador para a pasta dele.
+    pub(super) fn unpin_file(&mut self) {
+        self.open_file = None;
+    }
+
     /// Renomear o arquivo fixado mantém a referência válida.
     pub(super) fn remap_file(&mut self, from: &Path, to: &Path) {
         let Some(file) = &self.open_file else {

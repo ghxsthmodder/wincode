@@ -104,9 +104,18 @@ fn api(
             Ok(()) => json(serde_json::json!({ "ok": true })),
             Err(err) => plain(StatusCode::BAD_REQUEST, &err),
         },
+        "unpin" => {
+            let payload = {
+                let mut guard = state.lock().unwrap();
+                guard.unpin_file();
+                workspace_json(&guard)
+            };
+            json(payload)
+        }
         "ls" => list(param(query, "path"), param(query, "scope"), state),
         "read" => read(param(query, "path"), state),
         "write" => write(param(query, "path"), body, state),
+        "saveas" => save_as(param(query, "path"), body, state),
         "create" => create(param(query, "path"), param(query, "kind"), state),
         "rename" => rename(param(query, "from"), param(query, "to"), state),
         "delete" => delete_entry(param(query, "path"), state),
@@ -405,6 +414,47 @@ fn write(path_param: Option<String>, body: &[u8], state: &Arc<Mutex<FsState>>) -
         Ok(target) => target,
         Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
     };
+
+    match std::fs::write(&target, body) {
+        Ok(()) => json(serde_json::json!({
+            "ok": true,
+            "path": target.to_string_lossy(),
+        })),
+        Err(err) => plain(
+            StatusCode::BAD_REQUEST,
+            &format!("não foi possível salvar: {err}"),
+        ),
+    }
+}
+
+/// Grava um arquivo cujo caminho foi escolhido agora (aba criada em branco).
+///
+/// Um caminho relativo continua restrito à raiz do projeto; um caminho completo
+/// é respeitado porque foi digitado pelo usuário no diálogo de salvamento — o
+/// arquivo novo pode nascer fora do projeto aberto.
+fn save_as(path_param: Option<String>, body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let Some(requested) = path_param.map(|value| value.trim().to_string()) else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+    if requested.is_empty() {
+        return plain(StatusCode::BAD_REQUEST, "informe o caminho do arquivo");
+    }
+
+    let target = if std::path::Path::new(&requested).is_absolute() {
+        std::path::absolute(&requested).unwrap_or_else(|_| std::path::PathBuf::from(&requested))
+    } else {
+        match state.lock().unwrap().resolve(&requested) {
+            Ok(target) => target,
+            Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+        }
+    };
+
+    if target.is_dir() {
+        return plain(StatusCode::BAD_REQUEST, "o caminho é uma pasta");
+    }
+    if !target.parent().is_some_and(|parent| parent.is_dir()) {
+        return plain(StatusCode::BAD_REQUEST, "a pasta de destino não existe");
+    }
 
     match std::fs::write(&target, body) {
         Ok(()) => json(serde_json::json!({
