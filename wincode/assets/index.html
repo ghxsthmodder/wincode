@@ -344,6 +344,27 @@
     font: inherit; font-size: 11px; color: var(--muted); white-space: pre-wrap;
   }
   .gitout[hidden] { display: none; }
+  .gitout.side { max-height: 32vh; padding: 0; white-space: normal; }
+  .diffhead { margin: 0; padding: 5px 8px; border-bottom: 1px solid var(--border); }
+  .diffgrid { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .diffgrid td {
+    width: 50%; vertical-align: top; padding: 0 6px; white-space: pre-wrap;
+    word-break: break-all; font-family: ui-monospace, monospace;
+  }
+  .diffgrid td + td { border-left: 1px solid var(--border); }
+  .diffgrid td.del { background: rgba(200, 70, 70, 0.16); }
+  .diffgrid td.add { background: rgba(70, 160, 90, 0.16); }
+  .diffgrid tr.meta td { padding-top: 6px; color: var(--muted); border-top: 1px solid var(--border); }
+  .diffgrid tr:first-child.meta td { border-top: 0; padding-top: 0; }
+  .gitsync { display: flex; align-items: center; gap: 6px; margin: 8px 0 10px; }
+  .gitsync select {
+    flex: 1; min-width: 0; padding: 4px 8px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font: inherit; font-size: 12px;
+  }
+  .gitsync select:focus { outline: none; border-color: var(--accent); }
+  .gitsync button { padding: 3px 10px; font-size: 11px; }
+  .gitsync[hidden] { display: none; }
 
   .settings {
     width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 64px);
@@ -759,12 +780,20 @@
     <div class="dialog gitdialog">
       <h2>Git <span id="gitbranch" class="dim"></span></h2>
       <p id="gitsummary" class="dim"></p>
+      <div id="gitsync" class="gitsync" hidden>
+        <select id="gitbranches" title="Trocar de branch"></select>
+        <button id="gitfetch" type="button" title="Buscar o que mudou no remoto (sem mexer nos arquivos)">buscar</button>
+        <button id="gitpull" type="button" title="Trazer os commits do remoto (só avança se puder ser fast-forward)">pull</button>
+        <button id="gitpush" type="button" title="Enviar os commits locais">push</button>
+      </div>
       <div id="gitlist" class="gitlist"></div>
       <textarea id="gitmessage" rows="3" placeholder="mensagem do commit" spellcheck="false"></textarea>
-      <pre id="gitoutput" class="gitout" hidden></pre>
+      <div id="gitoutput" class="gitout" hidden></div>
+      <pre id="gitremote" class="gitout" hidden></pre>
       <div class="actions">
         <button id="gitclose" type="button">fechar</button>
         <span class="spacer"></span>
+        <button id="gitside" type="button" hidden>lado a lado</button>
         <button id="gitrefresh" type="button">atualizar</button>
         <button id="gitcommit" type="button" class="primary">commit</button>
       </div>
@@ -794,6 +823,10 @@ const els = {
   gitlist: $('gitlist'),
   gitmessage: $('gitmessage'),
   gitoutput: $('gitoutput'),
+  gitside: $('gitside'),
+  gitremote: $('gitremote'),
+  gitsync: $('gitsync'),
+  gitbranches: $('gitbranches'),
   statusgit: $('statusgit'),
   termout: $('termout'),
   inputline: $('inputline'),
@@ -1873,13 +1906,17 @@ const searchOptions = () => ({
   case: searchState.caseSensitive ? 1 : 0,
 });
 
-/** Existe substituição recente que o backend ainda consegue reverter. */
-let lastReplace = false;
+/** Quantas substituições recentes o backend ainda consegue reverter. */
+let undoSteps = 0;
 
 function syncSearchOptions() {
   els.searchcase.classList.toggle('on', !!searchState.caseSensitive);
   els.searchregex.classList.toggle('on', !!searchState.regex);
-  els.searchundo.hidden = !lastReplace;
+  els.searchundo.hidden = !undoSteps;
+  els.searchundo.textContent = undoSteps > 1 ? `desfazer (${undoSteps})` : 'desfazer';
+  els.searchundo.title = undoSteps > 1
+    ? `Desfazer a última substituição (${undoSteps} disponíveis)`
+    : 'Desfazer a última substituição em arquivos';
 }
 
 /** Comandos filtrados pela paleta (Ctrl+Shift+P). */
@@ -2004,12 +2041,12 @@ async function replaceInFiles() {
     const files = Number(result.files) || 0;
     const total = Number(result.replacements) || 0;
     const failed = Array.isArray(result.errors) && result.errors.length;
-    lastReplace = !!result.undo;
+    undoSteps = Number(result.undoSteps) || 0;
     syncSearchOptions();
     setStatus(
       files
         ? `${total} substituição(ões) em ${files} arquivo(s)${failed ? ' — houve falhas' : ''}${
-            lastReplace ? ' — desfazer na busca ou na paleta' : ''
+            undoSteps ? ' — desfazer na busca ou na paleta' : ''
           }`
         : 'nada foi substituído',
     );
@@ -2019,18 +2056,18 @@ async function replaceInFiles() {
 }
 
 /**
- * Desfaz a última substituição em arquivos. O backend guarda o texto anterior de
- * uma substituição por vez; desfazer duas vezes não existe.
+ * Desfaz a última substituição em arquivos. O backend guarda o texto anterior das
+ * últimas trocas; cada clique volta uma, da mais recente para a mais antiga.
  */
 async function undoReplace() {
-  if (!lastReplace) {
+  if (!undoSteps) {
     setStatus('nada para desfazer: nenhuma substituição recente');
     return;
   }
 
   try {
     const result = await apiJson('/api/undoreplace', { method: 'POST' });
-    lastReplace = false;
+    undoSteps = Number(result.undoSteps) || 0;
     syncSearchOptions();
     state.fileIndex = null;
     await reloadCleanTabs();
@@ -2040,7 +2077,9 @@ async function undoReplace() {
 
     const failed = Array.isArray(result.errors) && result.errors.length;
     setStatus(
-      `${Number(result.files) || 0} arquivo(s) restaurado(s)${failed ? ' — houve falhas' : ''}`,
+      `${Number(result.files) || 0} arquivo(s) restaurado(s)${failed ? ' — houve falhas' : ''}${
+        undoSteps ? ` — ${undoSteps} passo(s) ainda disponível(is)` : ''
+      }`,
     );
   } catch (err) {
     setStatus('não foi possível desfazer: ' + err.message);
@@ -3944,7 +3983,7 @@ async function refreshDir(path) {
 // ---------------------------------------------------------------------------
 let gitState = {
   repo: false, branch: '', detached: false, ahead: 0, behind: 0,
-  list: [], changes: new Map(), diff: null,
+  list: [], changes: new Map(), diff: null, sideBySide: false,
 };
 
 /** Caminho relativo à raiz, no formato que o `git status` devolve. */
@@ -3973,12 +4012,13 @@ async function refreshGit() {
       list,
       changes: new Map(list.map((change) => [normalizePath(change.path), change.code])),
       diff: gitState.diff,
+      sideBySide: gitState.sideBySide,
     };
   } catch {
     // Sem git instalado a interface só não mostra nada de repositório.
     gitState = {
       repo: false, branch: '', detached: false, ahead: 0, behind: 0,
-      list: [], changes: new Map(), diff: null,
+      list: [], changes: new Map(), diff: null, sideBySide: gitState.sideBySide,
     };
   }
 
@@ -4113,6 +4153,7 @@ function renderGitPanel() {
     if (gitState.behind) bits.push(`${gitState.behind} atrás`);
   }
   els.gitsummary.textContent = bits.join(' · ');
+  els.gitsync.hidden = !gitState.repo;
 
   els.gitlist.replaceChildren();
   if (!gitState.repo) {
@@ -4158,26 +4199,122 @@ async function stageChange(paths, stage) {
 }
 
 /** Mostra o diff de um arquivo no mesmo `<pre>` da saída do commit. */
+const escapeText = (text) =>
+  text.replace(/[&<>]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[ch]));
+
+/**
+ * Quebra o diff unificado em linhas de duas colunas: remoções à esquerda,
+ * adições à direita e contexto repetido dos dois lados. As linhas de cada
+ * bloco são emparelhadas na ordem — o suficiente para ler a troca sem sair do
+ * painel.
+ */
+function diffRows(text) {
+  const rows = [];
+  let del = [];
+  let add = [];
+  const flush = () => {
+    while (del.length || add.length) {
+      rows.push({ kind: 'pair', left: del.shift() || '', right: add.shift() || '' });
+    }
+  };
+
+  for (const line of text.split('\n')) {
+    if (!line) continue;
+    if (line.startsWith('@@') || /^(diff --git |index |--- |\+\+\+ |old mode|new mode|similarity |rename |Binary files)/.test(line)) {
+      flush();
+      rows.push({ kind: 'meta', text: line });
+      continue;
+    }
+    if (line.startsWith('-')) {
+      del.push(line.slice(1));
+      continue;
+    }
+    if (line.startsWith('+')) {
+      add.push(line.slice(1));
+      continue;
+    }
+    flush();
+    rows.push({ kind: 'ctx', text: line.startsWith(' ') ? line.slice(1) : line });
+  }
+  flush();
+  return rows;
+}
+
+function sideBySideHtml(text) {
+  const rows = diffRows(text).map((row) => {
+    if (row.kind === 'meta') {
+      return `<tr class="meta"><td colspan="2">${escapeText(row.text)}</td></tr>`;
+    }
+    if (row.kind === 'ctx') {
+      const line = escapeText(row.text);
+      return `<tr><td>${line}</td><td>${line}</td></tr>`;
+    }
+    return `<tr><td class="del">${escapeText(row.left)}</td><td class="add">${escapeText(row.right)}</td></tr>`;
+  });
+  return `<table class="diffgrid">${rows.join('')}</table>`;
+}
+
+/** Desenha o diff aberto no formato escolhido (unificado ou lado a lado). */
+function renderDiff() {
+  const diff = gitState.diff;
+  els.gitoutput.classList.toggle('side', !!(diff && diff.text && gitState.sideBySide));
+  els.gitside.hidden = !(diff && diff.text);
+  els.gitside.textContent = gitState.sideBySide ? 'unificado' : 'lado a lado';
+
+  if (!diff) {
+    els.gitoutput.hidden = true;
+    els.gitoutput.textContent = '';
+    return;
+  }
+
+  els.gitoutput.hidden = false;
+  if (!diff.text) {
+    els.gitoutput.textContent = `${diff.path}\n\n${diff.note}`;
+    return;
+  }
+
+  if (gitState.sideBySide) {
+    els.gitoutput.innerHTML =
+      `<p class="diffhead">${escapeText(diff.head)}${diff.truncated ? ' — cortado' : ''}</p>` +
+      sideBySideHtml(diff.text);
+    return;
+  }
+
+  els.gitoutput.textContent = `${diff.head}\n\n${diff.text}${
+    diff.truncated ? '\n\n[diff cortado: arquivo grande]' : ''
+  }`;
+}
+
 async function showDiff(path, staged) {
   try {
     const data = await apiJson(api('/api/gitdiff', { path, staged: staged ? 1 : 0 }));
-    els.gitoutput.hidden = false;
 
     if (!data.text) {
       const untracked = gitState.list.some(
         (change) => change.path === path && change.worktree === '?',
       );
-      els.gitoutput.textContent = !staged && untracked
-        ? `${path}\n\narquivo novo (não rastreado): prepare com + para ver o diff`
-        : `${path}\n\nsem diferenças aqui`;
-      gitState.diff = null;
-      return;
+      gitState.diff = {
+        path,
+        staged,
+        text: '',
+        head: '',
+        truncated: false,
+        note: !staged && untracked
+          ? 'arquivo novo (não rastreado): prepare com + para ver o diff'
+          : 'sem diferenças aqui',
+      };
+    } else {
+      gitState.diff = {
+        path,
+        staged,
+        text: data.text,
+        head: `${path} (${staged ? 'preparado' : 'no disco'})`,
+        truncated: !!data.truncated,
+        note: '',
+      };
     }
 
-    els.gitoutput.textContent = `${path} (${staged ? 'preparado' : 'no disco'})\n\n${data.text}${
-      data.truncated ? '\n\n[diff cortado: arquivo grande]' : ''
-    }`;
-    gitState.diff = { path, staged };
+    renderDiff();
   } catch (err) {
     setStatus(`git: ${err.message}`);
   }
@@ -4189,9 +4326,10 @@ async function openGit() {
     return;
   }
   els.git.hidden = false;
-  els.gitoutput.hidden = true;
   gitState.diff = null;
+  renderDiff();
   await refreshGit();
+  if (gitState.repo) await loadBranches();
   if (gitState.repo && gitState.list.length) els.gitmessage.focus();
 }
 
@@ -4243,10 +4381,171 @@ async function commitGit() {
   }
 }
 
+/**
+ * Lista de branches no seletor do painel. A branch atual vem do status; se ela
+ * ainda não tem ref (repositório sem commit) ou é HEAD destacado, o seletor
+ * mostra o estado em vez de fingir uma branch.
+ */
+async function loadBranches() {
+  if (!gitState.repo) {
+    els.gitbranches.replaceChildren();
+    els.gitsync.hidden = true;
+    return;
+  }
+
+  try {
+    const data = await apiJson('/api/gitbranches');
+    const names = Array.isArray(data.branches) ? data.branches : [];
+    els.gitbranches.replaceChildren();
+
+    const add = (label, value) => {
+      const option = document.createElement('option');
+      option.textContent = label;
+      option.value = value;
+      els.gitbranches.append(option);
+    };
+
+    if (gitState.detached) add('HEAD destacado', '');
+    for (const name of names) add(name, name);
+    if (!gitState.detached && gitState.branch && !names.includes(gitState.branch)) {
+      add(`${gitState.branch} (sem commit)`, gitState.branch);
+    }
+
+    els.gitbranches.value = gitState.detached ? '' : gitState.branch;
+    els.gitsync.hidden = false;
+  } catch {
+    els.gitsync.hidden = true;
+  }
+}
+
+/** Troca de branch pelo seletor, com confirmação (a árvore de trabalho muda). */
+async function checkoutBranch() {
+  const branch = els.gitbranches.value;
+  if (!branch || branch === gitState.branch) return;
+
+  const ok = await showDialog({
+    title: `trocar para “${branch}”?`,
+    message: gitState.list.length
+      ? 'há alterações não commitadas: o git recusa a troca se ela fosse sobrescrevê-las, e as demais seguem junto para a branch nova.'
+      : 'os arquivos abertos sem alterações pendentes são relidos do disco.',
+    confirmLabel: 'trocar',
+  });
+  if (!ok) {
+    els.gitbranches.value = gitState.branch;
+    return;
+  }
+
+  try {
+    const result = await apiJson('/api/gitcheckout', {
+      method: 'POST',
+      body: { branch },
+    });
+    if (!result.ok) {
+      els.gitbranches.value = gitState.branch;
+      setStatus('git: ' + (firstLine(result.output) || 'troca recusada'));
+      return;
+    }
+
+    gitState.diff = null;
+    renderDiff();
+    state.fileIndex = null;
+    setStatus(`na branch ${branch}`);
+    await reloadCleanTabs();
+    await refreshTree();
+    await refreshGit();
+    await loadBranches();
+  } catch (err) {
+    els.gitbranches.value = gitState.branch;
+    setStatus('erro ao trocar de branch: ' + err.message);
+  }
+}
+
+let gitSyncing = false;
+
+/** Desabilita o seletor e os botões enquanto um fetch/pull/push roda. */
+function setGitSyncBusy(busy) {
+  gitSyncing = busy;
+  for (const id of ['gitbranches', 'gitfetch', 'gitpull', 'gitpush']) {
+    const el = $(id);
+    if (el) el.disabled = busy;
+  }
+}
+
+/**
+ * `fetch`, `pull` (só fast-forward) e `push` pelo painel. Roda como job do
+ * terminal: a saída chega pelo poll e a interface continua respondendo.
+ */
+async function runGitSync(action) {
+  if (gitSyncing) return;
+
+  if (action !== 'fetch') {
+    const ok = await showDialog({
+      title: `${action} em ${gitState.branch || 'HEAD'}?`,
+      message: action === 'pull'
+        ? 'traz os commits do remoto; só avança se puder ser fast-forward — histórico divergido é recusado.'
+        : 'envia os commits locais; se o remoto recusar, nada muda aqui.',
+      confirmLabel: action,
+    });
+    if (!ok) return;
+  }
+
+  setGitSyncBusy(true);
+  gitState.diff = null;
+  renderDiff();
+  els.gitremote.hidden = false;
+  els.gitremote.textContent = `git ${action}…\n`;
+  setStatus(`git ${action}…`);
+
+  try {
+    const { id } = await apiJson(api('/api/gitsync', { action }), { method: 'POST' });
+    let text = `git ${action}\n\n`;
+    let code = 0;
+    for (;;) {
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const result = await apiJson(api('/api/poll', { id }));
+      if (result.out) {
+        text += result.out;
+        els.gitremote.textContent = text;
+      }
+      if (result.done) {
+        code = typeof result.code === 'number' ? result.code : 0;
+        break;
+      }
+    }
+
+    els.gitremote.textContent = `${text.trimEnd()}${
+      code ? `\n\n[exit ${code}]` : ''
+    }`;
+    setStatus(code === 0 ? `git ${action}: ok` : `git ${action}: saiu com ${code}`);
+
+    // `fetch` só atualiza as referências do remoto: nada em disco para reler.
+    if (action === 'pull') {
+      state.fileIndex = null;
+      await reloadCleanTabs();
+      await refreshTree();
+    }
+    await refreshGit();
+    await loadBranches();
+  } catch (err) {
+    els.gitremote.textContent += `\nerro: ${err.message}`;
+    setStatus(`git ${action}: ${err.message}`);
+  } finally {
+    setGitSyncBusy(false);
+  }
+}
+
 function bindGit() {
   els.statusgit.addEventListener('click', openGit);
   $('gitclose').addEventListener('click', closeGit);
   $('gitrefresh').addEventListener('click', () => refreshGit());
+  $('gitbranches').addEventListener('change', checkoutBranch);
+  $('gitfetch').addEventListener('click', () => runGitSync('fetch'));
+  $('gitpull').addEventListener('click', () => runGitSync('pull'));
+  $('gitpush').addEventListener('click', () => runGitSync('push'));
+  $('gitside').addEventListener('click', () => {
+    gitState.sideBySide = !gitState.sideBySide;
+    renderDiff();
+  });
   $('gitcommit').addEventListener('click', commitGit);
   els.git.addEventListener('pointerdown', (event) => {
     if (event.target === els.git) closeGit();

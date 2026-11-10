@@ -119,6 +119,9 @@ fn api(
             param(query, "staged"),
             state,
         ),
+        "gitbranches" => git_branches(state),
+        "gitcheckout" => git_checkout(body, state),
+        "gitsync" => git_sync(param(query, "action"), state, jobs),
         "history" => json(serde_json::Value::from(
             history.load(&param(query, "root").unwrap_or_default()),
         )),
@@ -863,6 +866,73 @@ fn git_diff(
 
     match crate::git::diff(&root, &path, staged) {
         Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Branches locais para o seletor do painel.
+fn git_branches(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    json(crate::git::branches(&root))
+}
+
+/// Troca de branch (`{ branch: "nome" }`).
+fn git_checkout(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    let Ok(parsed) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return plain(StatusCode::BAD_REQUEST, "corpo inválido: esperado JSON");
+    };
+    let branch = parsed
+        .get("branch")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+
+    match crate::git::checkout(&root, branch) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// `fetch`/`pull`/`push` como job de terminal: a resposta é o `id` para o poll.
+/// A rede pode demorar, e o handler roda na thread da interface.
+fn git_sync(
+    action: Option<String>,
+    state: &Arc<Mutex<FsState>>,
+    jobs: &Arc<crate::jobs::Jobs>,
+) -> Response<Body> {
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    // `--ff-only` evita um merge silencioso (e um editor aberto por ele): quando
+    // o histórico divergiu, o git recusa e a mensagem explica o que fazer.
+    let args: &[&str] = match action.as_deref() {
+        Some("fetch") => &["fetch", "--all"],
+        Some("pull") => &["pull", "--ff-only"],
+        Some("push") => &["push"],
+        _ => return plain(StatusCode::BAD_REQUEST, "ação inválida: fetch, pull ou push"),
+    };
+
+    match jobs.spawn_program("git", args, &root) {
+        Ok(id) => json(serde_json::json!({ "id": id })),
         Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }
 }

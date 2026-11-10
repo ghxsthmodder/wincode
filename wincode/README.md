@@ -169,13 +169,20 @@ despreparam tudo de uma vez. O **commit** leva só o que está preparado — com
 vazio, ele prepara tudo (`git add -A`) como antes — e mostra a saída do git (inclusive
 "nothing to commit").
 
+O diff abre unificado e o botão **lado a lado** o vira uma grade de duas colunas
+(remoções à esquerda, adições à direita) sem sair do painel. Acima da lista, o seletor de
+branch troca de branch depois de confirmar, e **buscar**, **pull** e **push** rodam em
+segundo plano (a saída aparece no painel sem travar a janela). O pull é `--ff-only`:
+histórico divergido é recusado em vez de virar merge silencioso.
+
 As linhas do explorador ganham a letra do estado: **M** alterado, **A** novo no índice,
 **D** excluído, **R** renomeado, **?** não rastreado. O status é pedido ao abrir o painel,
 depois de salvar e quando a árvore é recarregada — não a cada tecla, porque em repositório
 grande o `git status` custa caro.
 
-Tudo passa pelo `git.exe` do PATH, sem lib e sem credencial guardada: `push`, `pull` e
-`checkout` continuam no terminal. Fora de um repositório (ou sem git instalado) a barra
+Tudo passa pelo `git.exe` do PATH, sem lib e sem credencial guardada: o painel cobre
+status, staging, commit, troca de branch e `fetch`/`pull`/`push`, e o resto (rebase,
+stash, tags…) continua no terminal. Fora de um repositório (ou sem git instalado) a barra
 simplesmente não mostra nada.
 
 ## Recarregamento automático
@@ -275,8 +282,8 @@ fora e orçamento de 1,5 s (5 s na substituição); quando algo fica de fora, a 
 status avisa.
 
 Logo depois da troca, **desfazer** (no rodapé da busca ou na paleta) devolve o texto
-anterior de todos os arquivos tocados. Vale uma vez: a próxima substituição toma o lugar
-do backup.
+anterior de todos os arquivos tocados; clicar de novo volta a troca anterior. A pilha
+guarda as **10** últimas substituições e mostra quantas ainda dá para desfazer.
 
 ## Sessão por projeto
 
@@ -473,18 +480,20 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - No modo arquivo único, abrir outros arquivos (pelo terminal ou pelo `Ctrl+P`) cria abas
   normalmente, mas o explorador continua mostrando só o arquivo escolhido; fechar a aba
   dele ou usar **abrir pasta…** volta à árvore do projeto.
-- A busca é textual e sem expressões regulares; para padrões complexos, use o terminal
-  (`findstr`/`rg`).
+- A busca é textual (ou regex simples, do Rust); para padrões com *lookaround* ou
+  recursão, use o terminal (`rg`).
 - **Ir para símbolo** é um mapa textual, não o *outline* de um servidor de linguagem:
   declarações em linhas com formato incomum (multi-linha, geradas, dentro de expressões)
   podem não aparecer.
-- O git depende do `git.exe` no PATH; o painel faz status, staging e commit, sem troca de
-  branch nem `push`/`pull` (esses continuam no terminal). Arquivo ainda não rastreado só
-  ganha diff depois de preparado.
+- O git depende do `git.exe` no PATH; o painel faz status, staging, commit, troca de
+  branch e `fetch`/`pull`/`push`, mas não rebase, stash nem tags. Arquivo ainda não
+  rastreado só ganha diff depois de preparado; o `push` precisa do upstream já configurado
+  (o erro do git aparece no painel) e o pull só aceita fast-forward.
 - A substituição em arquivos só mexe no que o índice encontra: pastas ignoradas (`.git`,
   `node_modules`, `target`…), binários e arquivos acima de 1 MB ficam de fora, e arquivos
-  com alterações não salvas não são recarregados. O desfazer guarda só a última
-  substituição, e apenas enquanto o backup couber em 8 MB.
+  com alterações não salvas não são recarregados. O desfazer guarda as 10 últimas
+  substituições, e cada uma só entra se o backup couber em 8 MB (acima disso a pilha é
+  esquecida, para não desfazer fora de ordem).
 - O histórico do terminal guarda os 500 comandos mais recentes de cada projeto; projetos
   além dos 20 usados por último são esquecidos.
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta

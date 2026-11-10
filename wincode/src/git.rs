@@ -166,6 +166,81 @@ pub(super) fn diff(root: &Path, path: &str, staged: bool) -> Result<serde_json::
     }))
 }
 
+/// Branches locais em ordem alfabética. `HEAD` destacado não é branch: a
+/// interface mostra o estado pelo status e continua podendo escolher um nome.
+pub(super) fn branches(root: &Path) -> serde_json::Value {
+    let empty = serde_json::json!({ "branches": [] });
+    let Some(output) = git(
+        root,
+        &["for-each-ref", "--format=%(refname:short)", "refs/heads"],
+    ) else {
+        return empty;
+    };
+    if !output.ok {
+        return empty;
+    }
+
+    let mut names: Vec<String> = output
+        .stdout
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect();
+    names.sort_by_key(|name| name.to_lowercase());
+    names.dedup();
+
+    serde_json::json!({ "branches": names })
+}
+
+/// Troca de branch. O `switch` (git 2.23+) é o comando próprio para isso; em
+/// versão mais antiga o `checkout` faz o mesmo. Não passa pelo shell: o nome vai
+/// como argumento, então nunca vira comando.
+pub(super) fn checkout(root: &Path, branch: &str) -> Result<serde_json::Value, String> {
+    let branch = safe_branch(branch).ok_or("nome de branch inválido")?;
+
+    let output = match git(root, &["switch", &branch]) {
+        Some(output) if output.ok => output,
+        // `switch` não existe em git antigo: a mensagem de erro é a do próprio
+        // git, então vale tentar o `checkout` antes de mostrar qualquer coisa.
+        _ => git(root, &["checkout", &branch]).ok_or("git não encontrado")?,
+    };
+    let text = format!("{}{}", output.stdout, output.stderr);
+
+    Ok(serde_json::json!({
+        "ok": output.ok,
+        "branch": branch,
+        "output": text.trim(),
+    }))
+}
+
+/// Nome de branch que o git aceita e que não começa com `-` (opção): os
+/// caracteres proibidos em refs vêm da mesma regra do `git check-ref-format`.
+fn safe_branch(name: &str) -> Option<String> {
+    let name = name.trim();
+    if name.is_empty() || name.len() > 200 {
+        return None;
+    }
+    if name.starts_with('-')
+        || name.ends_with('/')
+        || name.ends_with('.')
+        || name.ends_with(".lock")
+    {
+        return None;
+    }
+    if name.contains("..") || name.contains("//") || name.contains("@{") {
+        return None;
+    }
+    if name
+        .chars()
+        .any(|ch| ch.is_control() || ch.is_whitespace() || "~^:?*[\\".contains(ch))
+    {
+        return None;
+    }
+
+    Some(name.to_string())
+}
+
 /// Aceita só caminho relativo à raiz, sem `..`: o `--` já impede injeção de
 /// opção, e isto impede o git de enxergar fora do projeto.
 fn safe_path(path: &str) -> Option<String> {
@@ -338,7 +413,7 @@ fn code_for(index: char, worktree: char) -> &'static str {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_status, safe_path};
+    use super::{branches, checkout, parse_status, safe_branch, safe_path};
 
     #[test]
     fn reads_branch_and_ahead_behind() {
@@ -423,5 +498,71 @@ mod tests {
         assert_eq!(safe_path("/etc/passwd"), None);
         assert_eq!(safe_path("C:\\Windows\\win.ini"), None);
         assert_eq!(safe_path("   "), None);
+    }
+
+    #[test]
+    fn accepts_only_plain_branch_names() {
+        assert_eq!(safe_branch("main").as_deref(), Some("main"));
+        assert_eq!(
+            safe_branch(" feature/login-2 ").as_deref(),
+            Some("feature/login-2")
+        );
+        assert_eq!(safe_branch("--force"), None);
+        assert_eq!(safe_branch("a b"), None);
+        assert_eq!(safe_branch("a..b"), None);
+        assert_eq!(safe_branch("a~1"), None);
+        assert_eq!(safe_branch("a:b"), None);
+        assert_eq!(safe_branch("a"), Some("a".into()));
+        assert_eq!(safe_branch(""), None);
+        assert_eq!(safe_branch(&"x".repeat(201)), None);
+    }
+
+    #[test]
+    fn lists_and_switches_branches_in_a_real_repository() {
+        let dir = std::env::temp_dir().join(format!("wincode-git-branches-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let run = |args: &[&str]| {
+            std::process::Command::new("git")
+                .current_dir(&dir)
+                .args(args)
+                .output()
+        };
+
+        // Sem git instalado o teste não tem o que verificar (o app também não).
+        if run(&["init", "-q"]).is_err() {
+            return;
+        }
+        std::fs::write(dir.join("a.txt"), "um\n").unwrap();
+        run(&["add", "a.txt"]);
+        run(&[
+            "-c",
+            "user.name=teste",
+            "-c",
+            "user.email=teste@exemplo",
+            "commit",
+            "-qm",
+            "primeiro",
+        ]);
+        run(&["branch", "tema"]);
+
+        let listed = branches(&dir);
+        let names: Vec<&str> = listed["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"tema"), "{names:?}");
+
+        let switched = checkout(&dir, "tema").unwrap();
+        assert_eq!(switched["ok"], true, "{}", switched["output"]);
+        assert_eq!(switched["branch"], "tema");
+
+        // Nome com cara de opção não chega ao git.
+        assert!(checkout(&dir, "--force").is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

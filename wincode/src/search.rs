@@ -15,22 +15,54 @@ const BUDGET: Duration = Duration::from_millis(1500);
 const REPLACE_BUDGET: Duration = Duration::from_secs(5);
 /// Caracteres da linha mostrados na prévia.
 const MAX_PREVIEW: usize = 200;
-/// Teto do que fica guardado para desfazer a última substituição. Acima disso o
-/// desfazer fica indisponível — melhor recusar do que reverter pela metade.
+/// Teto do que fica guardado por substituição. Acima disso o desfazer fica
+/// indisponível — melhor recusar do que reverter pela metade.
 const UNDO_BYTES: usize = 8 * 1024 * 1024;
+/// Substituições que dá para desfazer em sequência (a mais recente primeiro).
+const UNDO_STEPS: usize = 10;
+/// Teto de memória da pilha inteira: passou disso, o passo mais antigo sai.
+const UNDO_TOTAL_BYTES: usize = 24 * 1024 * 1024;
 
-/// Conteúdo anterior dos arquivos da última substituição, para desfazer uma vez.
+/// Conteúdo anterior dos arquivos de uma substituição, para desfazer.
 struct Snapshot {
     root: PathBuf,
     files: Vec<(PathBuf, String)>,
 }
 
-/// Uma substituição por vez: desfazer a anterior (ou pedir de novo) é o que a
-/// interface oferece. Guardar um histórico de substituições custaria muito mais
-/// memória por um caso raro.
-fn last() -> &'static Mutex<Option<Snapshot>> {
-    static LAST: OnceLock<Mutex<Option<Snapshot>>> = OnceLock::new();
-    LAST.get_or_init(|| Mutex::new(None))
+impl Snapshot {
+    fn bytes(&self) -> usize {
+        self.files.iter().map(|(_, text)| text.len()).sum()
+    }
+}
+
+/// Pilha de substituições: desfazer volta uma troca por vez, na ordem inversa.
+/// Passos de projetos diferentes convivem; cada projeto só alcança os seus.
+fn last() -> &'static Mutex<Vec<Snapshot>> {
+    static LAST: OnceLock<Mutex<Vec<Snapshot>>> = OnceLock::new();
+    LAST.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Guarda o passo e descarta os mais antigos quando a pilha cresce demais.
+fn remember(snapshot: Snapshot) {
+    let mut stack = last().lock().unwrap();
+    stack.push(snapshot);
+    while stack.len() > UNDO_STEPS {
+        stack.remove(0);
+    }
+    while stack.len() > 1 && stack.iter().map(Snapshot::bytes).sum::<usize>() > UNDO_TOTAL_BYTES {
+        stack.remove(0);
+    }
+}
+
+/// Quantos passos do projeto dá para desfazer agora (o do topo da pilha).
+fn steps_for(root: &Path) -> usize {
+    last()
+        .lock()
+        .unwrap()
+        .iter()
+        .rev()
+        .take_while(|snapshot| snapshot.root == root)
+        .count()
 }
 
 /// Como o texto é interpretado: busca literal (escapada) ou expressão regular,
@@ -183,22 +215,27 @@ pub(super) fn replace(
         }
     }
 
-    let can_undo = can_undo && files > 0;
-    *last().lock().unwrap() = if can_undo {
-        Some(Snapshot {
+    if files == 0 {
+        // Nada mudou: os passos anteriores continuam válidos.
+    } else if can_undo {
+        remember(Snapshot {
             root: root.to_path_buf(),
             files: originals,
-        })
+        });
     } else {
-        None
-    };
+        // Uma troca que não cabe no backup invalida a pilha: desfazer fora de
+        // ordem gravaria texto que não corresponde ao disco.
+        last().lock().unwrap().clear();
+    }
+    let steps = steps_for(root);
 
     Ok(serde_json::json!({
         "files": files,
         "replacements": replacements,
         "errors": errors,
         "truncated": truncated,
-        "undo": can_undo,
+        "undo": steps > 0,
+        "undoSteps": steps,
     }))
 }
 
@@ -207,8 +244,8 @@ pub(super) fn replace(
 /// tocou nesta sessão.
 pub(super) fn undo(root: &Path) -> Result<serde_json::Value, String> {
     let snapshot = {
-        let mut guard = last().lock().unwrap();
-        match guard.as_ref() {
+        let mut stack = last().lock().unwrap();
+        match stack.last() {
             None => {
                 return Err("nada para desfazer: nenhuma substituição recente neste projeto".into())
             }
@@ -217,7 +254,7 @@ pub(super) fn undo(root: &Path) -> Result<serde_json::Value, String> {
             }
             Some(_) => {}
         }
-        guard.take().unwrap()
+        stack.pop().unwrap()
     };
 
     let mut restored = 0usize;
@@ -229,9 +266,12 @@ pub(super) fn undo(root: &Path) -> Result<serde_json::Value, String> {
         }
     }
 
+    let steps = steps_for(root);
     Ok(serde_json::json!({
         "files": restored,
         "errors": errors,
+        "undo": steps > 0,
+        "undoSteps": steps,
     }))
 }
 
@@ -289,6 +329,13 @@ mod tests {
     fn serial() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
         LOCK.lock().unwrap_or_else(|err| err.into_inner())
+    }
+
+    /// A pilha do desfazer é global: cada teste começa sem os passos do anterior.
+    fn fresh(tag: &str) -> (std::sync::MutexGuard<'static, ()>, std::path::PathBuf) {
+        let guard = serial();
+        super::last().lock().unwrap().clear();
+        (guard, project(tag))
     }
 
     fn paths(result: &serde_json::Value) -> Vec<String> {
@@ -397,8 +444,7 @@ mod tests {
 
     #[test]
     fn replace_literal_keeps_dollar_signs_verbatim() {
-        let _guard = serial();
-        let dir = project("replace");
+        let (_guard, dir) = fresh("replace");
         let result = replace(&dir, "item", "$1 e texto", &Options::default()).unwrap();
 
         // `src/main.rs` também tem um "Item" e a busca não diferencia caixa.
@@ -414,8 +460,7 @@ mod tests {
 
     #[test]
     fn replace_with_regex_uses_capture_groups() {
-        let _guard = serial();
-        let dir = project("replace-regex");
+        let (_guard, dir) = fresh("replace-regex");
         let result = replace(
             &dir,
             "let\\s+(\\w+)",
@@ -434,8 +479,7 @@ mod tests {
 
     #[test]
     fn undo_restores_the_text_of_the_last_replace() {
-        let _guard = serial();
-        let dir = project("undo");
+        let (_guard, dir) = fresh("undo");
         let readme = dir.join("README.md");
         let before = std::fs::read_to_string(&readme).unwrap();
 
@@ -456,8 +500,7 @@ mod tests {
 
     #[test]
     fn undo_refuses_another_project() {
-        let _guard = serial();
-        let dir = project("undo-root");
+        let (_guard, dir) = fresh("undo-root");
         replace(&dir, "item", "coisa", &Options::default()).unwrap();
 
         let other = dir.join("subprojeto");
@@ -472,9 +515,45 @@ mod tests {
     }
 
     #[test]
+    fn undo_walks_back_one_replace_at_a_time() {
+        let (_guard, dir) = fresh("undo-steps");
+        let readme = dir.join("README.md");
+        let before = std::fs::read_to_string(&readme).unwrap();
+
+        replace(&dir, "item", "coisa", &Options::default()).unwrap();
+        let second = replace(&dir, "coisa", "outra", &Options::default()).unwrap();
+        assert_eq!(second["undoSteps"], 2);
+        assert!(std::fs::read_to_string(&readme).unwrap().contains("outra"));
+
+        let first = undo(&dir).unwrap();
+        assert_eq!(first["undoSteps"], 1);
+        assert_eq!(first["undo"], true);
+        assert!(std::fs::read_to_string(&readme).unwrap().contains("coisa"));
+
+        let last = undo(&dir).unwrap();
+        assert_eq!(last["undoSteps"], 0);
+        assert_eq!(last["undo"], false);
+        assert_eq!(std::fs::read_to_string(&readme).unwrap(), before);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_replace_that_changes_nothing_keeps_the_earlier_steps() {
+        let (_guard, dir) = fresh("undo-noop");
+        replace(&dir, "item", "coisa", &Options::default()).unwrap();
+
+        let noop = replace(&dir, "nao-existe-aqui", "x", &Options::default()).unwrap();
+        assert_eq!(noop["files"], 0);
+        assert_eq!(noop["undoSteps"], 1);
+        assert_eq!(undo(&dir).unwrap()["files"], 2);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn undo_is_unavailable_when_nothing_changed() {
-        let _guard = serial();
-        let dir = project("undo-empty");
+        let (_guard, dir) = fresh("undo-empty");
         let result = replace(&dir, "nao-existe-aqui", "x", &Options::default()).unwrap();
         assert_eq!(result["files"], 0);
         assert_eq!(result["undo"], false);

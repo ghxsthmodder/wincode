@@ -34,7 +34,7 @@ impl Jobs {
             return Err("comando vazio".into());
         }
 
-        let mut child = shell(cmd)
+        let child = shell(cmd)
             .current_dir(cwd)
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
@@ -42,6 +42,44 @@ impl Jobs {
             .spawn()
             .map_err(|e| format!("falha ao executar: {e}"))?;
 
+        Ok(self.register(child))
+    }
+
+    /// Roda um programa direto, sem shell, e devolve o mesmo `id` de poll do
+    /// terminal. O painel do git usa isto para `fetch`/`pull`/`push`: a rede pode
+    /// demorar, e a thread da interface não pode ficar presa esperando.
+    pub(super) fn spawn_program(
+        &self,
+        program: &str,
+        args: &[&str],
+        cwd: &Path,
+    ) -> Result<u64, String> {
+        let mut command = Command::new(program);
+        command
+            .current_dir(cwd)
+            .args(args)
+            // Sem um console para perguntar, o git ficaria pendurado esperando
+            // credencial; o erro dele é melhor do que uma janela travada.
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let child = command
+            .spawn()
+            .map_err(|e| format!("falha ao executar {program}: {e}"))?;
+
+        Ok(self.register(child))
+    }
+
+    fn register(&self, mut child: std::process::Child) -> u64 {
         let pid = child.id();
         let output = Arc::new(Mutex::new(String::new()));
         let finished = Arc::new(Mutex::new(None));
@@ -58,7 +96,11 @@ impl Jobs {
 
         let done = finished.clone();
         thread::spawn(move || {
-            let code = child.wait().ok().and_then(|status| status.code()).unwrap_or(-1);
+            let code = child
+                .wait()
+                .ok()
+                .and_then(|status| status.code())
+                .unwrap_or(-1);
             for reader in readers {
                 let _ = reader.join();
             }
@@ -79,7 +121,7 @@ impl Jobs {
             },
         );
 
-        Ok(id)
+        id
     }
 
     /// Devolve a saída produzida desde o último poll e o código de saída (se terminou).
