@@ -122,8 +122,10 @@ fn api(
         "cd" => cd(param(query, "path"), state),
         "exec" => exec(param(query, "cmd").unwrap_or_default(), state, jobs),
         "poll" => poll(param(query, "id"), jobs),
+        "termkill" => term_kill(param(query, "id"), jobs),
         "watch" => watch(body, state),
         "settings" => settings_get(settings),
+        "configfile" => config_file(settings),
         "savesettings" => settings_save(body, settings),
         _ => plain(
             StatusCode::NOT_FOUND,
@@ -651,6 +653,33 @@ fn poll(id: Option<String>, jobs: &Arc<Jobs>) -> Response<Body> {
         })),
         Err(err) => plain(StatusCode::NOT_FOUND, &err),
     }
+}
+
+fn term_kill(id: Option<String>, jobs: &Arc<Jobs>) -> Response<Body> {
+    let Some(id) = id.and_then(|value| value.parse::<u64>().ok()) else {
+        return plain(StatusCode::BAD_REQUEST, "id inválido");
+    };
+
+    match jobs.kill(id) {
+        Ok(()) => json(serde_json::json!({ "ok": true })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// `settings.json` aberto como arquivo no editor: devolve o caminho real e o
+/// texto do disco para a aba ser salva pelo mesmo `savesettings` (com validação).
+fn config_file(settings: &Settings) -> Response<Body> {
+    let Some(path) = settings.path() else {
+        return plain(
+            StatusCode::BAD_REQUEST,
+            "não foi possível localizar a pasta de configuração do usuário",
+        );
+    };
+
+    json(serde_json::json!({
+        "path": path.to_string_lossy(),
+        "text": settings.read_raw(),
+    }))
 }
 
 fn settings_get(settings: &Settings) -> Response<Body> {

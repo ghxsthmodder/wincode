@@ -132,6 +132,12 @@ streaming, sem janela de console. O botão **⛶** (ou **terminal em tela cheia*
 leva o terminal para a janela inteira; `Esc` ou o mesmo botão voltam ao normal — ocultar
 com `Ctrl+J` também sai da tela cheia.
 
+Enquanto um comando roda, o botão **■ parar** aparece no cabeçalho do terminal, e `Ctrl+C`
+com o foco no prompt faz o mesmo: o processo é morto **em árvore** (`taskkill /T /F`), então
+um `cargo build` ou `npm run dev` não deixa compiladores/servidores órfãos. A saída que já
+estava no pipe ainda é mostrada, seguida do código de saída. Sem comando rodando, `Ctrl+C`
+volta ao comportamento de sempre (abandonar a linha digitada).
+
 A saída é **tratada antes de aparecer**, porque um pipe não é um terminal de verdade:
 
 - **codificação**: os bytes são decodificados aos poucos, guardando a sequência que ficou
@@ -172,6 +178,31 @@ Cada arquivo aberto vira uma aba acima do editor:
 
 A ordem das abas segue a ordem de abertura, e a paleta (`Ctrl+Shift+P`) também
 oferece **fechar arquivo atual**.
+
+`Ctrl+Shift+T` reabre a última aba fechada (a pilha guarda as 20 últimas). Arquivos salvos
+voltam do disco, com cursor e rolagem de onde estavam; uma aba criada em branco volta com o
+texto que tinha, ainda sem caminho. Abas de arquivos abertos por caminho completo (fora do
+projeto) não são reabertas por aí — a leitura é restrita à raiz.
+
+**Salvar como…** e **salvar uma cópia…** estão na paleta: o primeiro grava em outro
+caminho e leva a aba para lá (o arquivo antigo fica como estava), o segundo só grava a
+cópia e mantém a aba atual. Caminho relativo continua preso ao projeto; caminho completo
+pode sair dele.
+
+## Navegação no arquivo
+
+Abaixo das abas, o **breadcrumb** mostra o caminho do arquivo ativo. Clicar em qualquer
+trecho de pasta expande aquela pasta no explorador e destaca a linha (o mesmo que
+**revelar arquivo ativo no explorador**, na paleta). Arquivo fora do projeto aparece
+marcado e sem clique, porque a árvore só mostra a raiz aberta.
+
+`Ctrl+Shift+O` (**ir para símbolo no arquivo…**) lista as declarações do arquivo ativo com
+filtro por subsequência e leva o cursor à linha escolhida. O Monaco standalone não traz o
+*outline* do VSCode, então o mapa é textual: funções, classes, tipos, `impl`, métodos e
+variáveis reconhecidos pelo começo da linha, mais os cabeçalhos de Markdown (só em `.md`).
+
+`Alt+↑`/`Alt+↓` movem a linha, `Shift+Alt+↓` duplica a linha e `Ctrl+/` comenta — os
+comandos nativos do Monaco ligados ao editor.
 
 ## Abertura rápida (Ctrl+P)
 
@@ -246,6 +277,11 @@ estilo do cursor, minimapa, rolagem suave e **salvar automaticamente** (~1s apó
 - **Terminal**: tamanho da fonte
 - **restaurar padrões** devolve tudo ao inicial
 
+**abrir settings.json** (na paleta) abre o próprio arquivo de preferências numa aba: o
+salvamento passa pela mesma validação do painel, e as opções novas são aplicadas na hora —
+útil para ver o formato ou editar vários campos de uma vez. JSON inválido é recusado com a
+mensagem do parser e a aba continua com as alterações pendentes.
+
 A indentação vale também para os arquivos já abertos, e o tema do Monaco é trocado sem
 reabrir o editor. As preferências ficam em um JSON fora do projeto, no diretório de
 configuração do usuário:
@@ -309,10 +345,13 @@ digitar `>` troca para a paleta.
 
 Comandos disponíveis:
 
-- **arquivo**: abrir rapidamente (Ctrl+P), buscar em arquivos (Ctrl+Shift+F), salvar,
-  renomear e excluir o arquivo atual, novo arquivo/pasta, recarregar a árvore
+- **arquivo**: abrir rapidamente (Ctrl+P), buscar em arquivos (Ctrl+Shift+F), ir para
+  símbolo (Ctrl+Shift+O), salvar, **salvar como**, **salvar uma cópia**, **reabrir aba
+  fechada** (Ctrl+Shift+T), **revelar no explorador**, renomear e excluir o arquivo atual,
+  novo arquivo/pasta, recarregar a árvore
 - **projeto**: abrir pasta/arquivo, criar arquivo em branco, mostrar/ocultar explorador,
-  abas e terminal, terminal em tela cheia, focar e limpar o terminal
+  abas e terminal, terminal em tela cheia, focar e limpar o terminal, **interromper o
+  comando em execução** (só aparece enquanto há um)
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
   ícones da árvore e salvamento automático; restaurar padrões
@@ -325,6 +364,9 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+S` — salva o arquivo aberto
 - `Ctrl+Shift+S` — salva todas as abas com alterações
 - `Ctrl+W` — fecha a aba atual (pede confirmação se houver alterações)
+- `Ctrl+Shift+T` — reabre a última aba fechada
+- `Ctrl+Shift+O` — vai para um símbolo do arquivo ativo
+- `Alt+↑` / `Alt+↓` — move a linha atual; `Shift+Alt+↓` duplica a linha; `Ctrl+/` comenta
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` — próxima/anterior, na ordem de abertura
 - `Ctrl+P` — abertura rápida de arquivos do projeto (`>` troca para a paleta)
 - `Ctrl+Shift+F` — busca textual nos arquivos do projeto (`>` troca para a paleta)
@@ -336,6 +378,7 @@ persistem na hora, do mesmo jeito que no painel.
 - `Ctrl+Shift+P` — abre a paleta de comandos (`Esc` também fecha)
 - `Ctrl+B` — mostra/oculta o explorador
 - `Ctrl+J` — mostra/oculta o terminal (sai da tela cheia, se estiver nela)
+- `Ctrl+C` no prompt — interrompe o comando em execução (ou abandona a linha digitada)
 - `Esc` — fecha menus, diálogos e a paleta, e sai do terminal em tela cheia
 
 Os atalhos do navegador embutido (recarregar, imprimir, zoom da página) ficam desligados
@@ -381,6 +424,11 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
   dele ou usar **abrir pasta…** volta à árvore do projeto.
 - A busca é textual e sem expressões regulares; para padrões complexos, use o terminal
   (`findstr`/`rg`).
+- **Ir para símbolo** é um mapa textual, não o *outline* de um servidor de linguagem:
+  declarações em linhas com formato incomum (multi-linha, geradas, dentro de expressões)
+  podem não aparecer.
+- **Salvar como** sobrescreve um arquivo existente sem pedir confirmação; use **salvar uma
+  cópia…** quando quiser garantir o original.
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
   que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.

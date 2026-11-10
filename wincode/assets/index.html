@@ -113,6 +113,23 @@
     height: var(--editor-head-height);
     overflow: hidden;
   }
+  /* Caminho do arquivo ativo, clicável: cada trecho expande a pasta no explorador. */
+  .crumb {
+    display: flex; align-items: center; gap: 1px; height: 24px; padding: 0 10px;
+    background: var(--surface); border-bottom: 1px solid var(--border);
+    font-size: 11.5px; color: var(--muted);
+    flex: 0 0 24px; overflow: hidden; white-space: nowrap;
+  }
+  .crumb[hidden] { display: none; }
+  .crumb .seg {
+    border: 0; background: transparent; color: inherit; font: inherit;
+    padding: 0 3px; border-radius: 3px; cursor: pointer;
+    max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  }
+  .crumb .seg:hover { background: rgba(127,127,127,.18); color: var(--text); }
+  .crumb .seg.leaf { color: var(--text); }
+  .crumb .sep { opacity: .45; }
+  .crumb .outside { color: var(--accent2); }
   .tabs {
     flex: 1; display: flex; align-items: stretch; gap: 2px; height: 100%;
     overflow-x: auto; overflow-y: hidden; scrollbar-width: none;
@@ -160,11 +177,16 @@
     background: transparent; border: 1px solid var(--border); color: var(--text);
     border-radius: 4px; padding: 1px 8px; font: inherit; font-size: 11px; cursor: pointer;
   }
+  /* Interromper só aparece com um comando rodando, e no tom de perigo. */
+  .terminal-head button.stop { border-color: var(--danger); color: var(--danger); }
+  .terminal-head button.stop:hover { background: var(--danger); color: var(--surface); }
   /* Tela cheia: o terminal cobre a janela toda sem tocar no layout do editor. */
   .terminal.fullscreen {
     position: fixed; inset: 0; z-index: 60; height: auto;
     flex: 1 1 auto; border-top: 0;
   }
+  /* Na tela cheia o caminho do arquivo (breadcrumb) não tem a ver com o terminal. */
+  body.term-full .crumb { display: none; }
   body.term-full .main > .resize-handle.vert { display: none; }
   /* O prompt é a última linha do buffer, não uma barra fixa: rola junto. */
   .termout {
@@ -412,6 +434,7 @@
         <div class="editor-head">
           <div id="tabs" class="tabs" hidden></div>
         </div>
+        <div id="crumb" class="crumb" hidden></div>
         <div class="editor">
           <div id="editor"></div>
 
@@ -453,8 +476,9 @@
             <span>terminal</span>
             <span id="shellcwd" class="cwd dim"></span>
             <span class="spacer"></span>
-            <button id="btntermfull" title="Terminal em tela cheia (Esc sai)">⛶</button>
-            <button id="btnclear">limpar</button>
+            <button id="btntermstop" class="stop" type="button" hidden title="Interromper o comando (Ctrl+C)">■ parar</button>
+            <button id="btntermfull" type="button" title="Terminal em tela cheia (Esc sai)">⛶</button>
+            <button id="btnclear" type="button">limpar</button>
           </div>
           <div id="termout" class="termout">
             <div id="inputline" class="inputline">
@@ -653,6 +677,7 @@ const els = {
   tree: $('tree'),
   editorEl: $('editor'),
   tabs: $('tabs'),
+  crumb: $('crumb'),
   settings: $('settings'),
   palette: $('palette'),
   paletteinput: $('paletteinput'),
@@ -676,6 +701,8 @@ const els = {
 
 const state = {
   root: '', cwd: '', selectedDir: '', expanded: new Set(), running: false,
+  // Id do comando em execução no terminal (para interromper pelo /api/termkill).
+  jobId: 0,
   history: [], historyIndex: 0, historyDraft: '', selectionRequired: false,
   // Caminho do arquivo aberto sozinho: o explorador mostra só ele.
   singleFile: '',
@@ -1525,8 +1552,14 @@ function paletteCommands() {
   const commands = [
     { title: 'abrir configurações', hint: 'Ctrl+,', run: openSettings },
     { title: 'salvar arquivo', hint: 'Ctrl+S', run: saveActiveFile },
+    { title: 'salvar como…', run: () => saveFileAs(false) },
+    { title: 'salvar uma cópia…', run: () => saveFileAs(true) },
     { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
     { title: 'buscar em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
+    { title: 'ir para símbolo no arquivo…', hint: 'Ctrl+Shift+O', run: openSymbols },
+    { title: 'reabrir aba fechada', hint: 'Ctrl+Shift+T', run: reopenClosedTab },
+    { title: 'revelar arquivo ativo no explorador', run: () => revealInExplorer(activePath) },
+    { title: 'abrir settings.json (configuração do editor)', run: openConfigFile },
     { title: 'abrir arquivo…', run: chooseFile },
     { title: 'novo arquivo em branco…', run: newBlankFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
@@ -1543,6 +1576,9 @@ function paletteCommands() {
     { title: `${settings.showTabs ? 'ocultar' : 'mostrar'} abas de arquivo`, run: () => toggleSetting('showTabs') },
     { title: 'focar terminal', run: () => focusTerminal() },
     { title: 'terminal em tela cheia', run: toggleTerminalFullscreen },
+    ...(state.running
+      ? [{ title: 'interromper o comando em execução', run: stopCommand }]
+      : []),
     { title: 'limpar terminal', hint: 'Ctrl+L', run: () => { clearTerminal(); focusTerminal(); } },
     {
       title: `${settings.minimap ? 'ocultar' : 'mostrar'} minimapa`,
@@ -1623,6 +1659,84 @@ function fileScore(path, query) {
   if (nameScore >= 0) return nameScore;
   const pathScore = fuzzyScore(path, query);
   return pathScore < 0 ? -1 : pathScore + 200;
+}
+
+/**
+ * Símbolos do arquivo ativo (Ctrl+Shift+O). O Monaco standalone não traz o
+ * "ir para símbolo" do VSCode (é código do workbench), então o mapa aqui é
+ * textual: os padrões de declaração mais comuns, com a linha como destino.
+ */
+const SYMBOL_PATTERNS = [
+  // Cabeçalho só vale para Markdown: em Python/CSS `#` no início é comentário/seletor.
+  [/^\s*#+\s+(\S.*?)\s*$/, 'seção', true],
+  [/^\s*(?:export\s+)?(?:default\s+)?(?:pub\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)/, 'função'],
+  [/^\s*(?:export\s+)?(?:default\s+)?(?:abstract\s+)?(?:sealed\s+)?class\s+([A-Za-z_$][\w$]*)/, 'classe'],
+  [/^\s*(?:export\s+)?(?:declare\s+)?(?:pub\s+)?(?:interface|trait|struct|enum|namespace|module)\s+([A-Za-z_$][\w$]*)/, 'tipo'],
+  [/^\s*(?:pub\s+)?(?:async\s+)?fn\s+([A-Za-z_]\w*)/, 'função'],
+  [/^\s*impl(?:<[^>]*>)?\s+([A-Za-z_]\w*)/, 'impl'],
+  [/^\s*(?:def|func|fun)\s+([A-Za-z_]\w*)/, 'função'],
+  [/^\s*(?:export\s+)?(?:pub\s+)?(?:const|let|var|static|final)\s+([A-Za-z_$][\w$]*)/, 'variável'],
+  [/^\s*(?:public|private|protected|internal)\s+(?:static\s+)?(?:[\w<>\[\], ]+\s+)?([A-Za-z_]\w*)\s*\(/, 'método'],
+];
+
+function symbolItems(query) {
+  const entry = activePath ? models.get(activePath) : null;
+  if (!entry) return [];
+
+  const lines = entry.model.getValue().split(/\r?\n/);
+  const markdown = /\.(?:md|mdx|markdown)$/i.test(String(activePath));
+  const found = [];
+  for (let index = 0; index < lines.length && found.length < 300; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.length > 200) continue;
+
+    for (const [pattern, kind, markdownOnly] of SYMBOL_PATTERNS) {
+      if (markdownOnly && !markdown) continue;
+      const match = line.match(pattern);
+      if (!match) continue;
+      const name = String(match[1] || '').trim();
+      if (name) found.push({ name, kind, line: index + 1 });
+      break;
+    }
+  }
+
+  const matched = query
+    ? found
+        .map((item, order) => ({ item, order, score: fuzzyScore(item.name, query) }))
+        .filter((entry) => entry.score >= 0)
+        .sort((a, b) => a.score - b.score || a.order - b.order)
+        .map((entry) => entry.item)
+    : found;
+
+  return matched.slice(0, 80).map((item) => ({
+    title: item.name,
+    hint: `${item.kind} · linha ${item.line}`,
+    run: () => jumpToLine(item.line),
+  }));
+}
+
+function jumpToLine(line, column = 1) {
+  if (!view) return;
+  const target = {
+    lineNumber: Math.max(1, Number(line) || 1),
+    column: Math.max(1, Number(column) || 1),
+  };
+  view.setPosition(target);
+  view.revealLineInCenter(target.lineNumber);
+  view.focus();
+}
+
+function openSymbols() {
+  if (!activePath || !models.has(activePath)) {
+    setStatus('abra um arquivo para ir a um símbolo');
+    return;
+  }
+  setPaletteMode('symbols');
+  els.paletteinput.value = '';
+  els.palette.hidden = false;
+  els.paletteinput.focus();
+  renderPalette();
 }
 
 let paletteMode = 'commands';
@@ -1718,9 +1832,11 @@ function renderPalette() {
   const query = els.paletteinput.value.trim();
   paletteItems = paletteMode === 'files'
     ? quickOpenItems(query)
-    : paletteMode === 'search'
-      ? searchItems()
-      : commandItems(query);
+    : paletteMode === 'symbols'
+      ? symbolItems(query)
+      : paletteMode === 'search'
+        ? searchItems()
+        : commandItems(query);
 
   paletteIndex = 0;
   els.palettelist.replaceChildren();
@@ -1732,13 +1848,15 @@ function renderPalette() {
       ? (state.selectionRequired
           ? 'abra uma pasta para buscar arquivos'
           : (query ? 'nenhum arquivo encontrado' : 'nenhum arquivo no índice'))
-      : paletteMode === 'search'
-        ? (searchState.loading
-            ? 'buscando…'
-            : (searchState.query.length < 2
-                ? (state.selectionRequired ? 'abra uma pasta para buscar arquivos' : 'digite ao menos 2 caracteres')
-                : 'nenhum resultado'))
-        : 'nenhum comando encontrado';
+      : paletteMode === 'symbols'
+        ? (query ? 'nenhum símbolo com esse nome' : 'nenhum símbolo reconhecido neste arquivo')
+        : paletteMode === 'search'
+          ? (searchState.loading
+              ? 'buscando…'
+              : (searchState.query.length < 2
+                  ? (state.selectionRequired ? 'abra uma pasta para buscar arquivos' : 'digite ao menos 2 caracteres')
+                  : 'nenhum resultado'))
+          : 'nenhum comando encontrado';
     els.palettelist.append(empty);
     return;
   }
@@ -1789,9 +1907,11 @@ function setPaletteMode(mode) {
   }
   els.paletteinput.placeholder = mode === 'files'
     ? 'digite para abrir um arquivo…'
-    : mode === 'search'
-      ? 'buscar em arquivos…'
-      : 'digite um comando…';
+    : mode === 'symbols'
+      ? 'ir para um símbolo do arquivo…'
+      : mode === 'search'
+        ? 'buscar em arquivos…'
+        : 'digite um comando…';
 }
 
 function openPalette() {
@@ -1908,6 +2028,16 @@ function bindPalette() {
       if (ctrl && event.shiftKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         openSearch();
+        return;
+      }
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === 'o') {
+        event.preventDefault();
+        openSymbols();
+        return;
+      }
+      if (ctrl && event.shiftKey && event.key.toLowerCase() === 't') {
+        event.preventDefault();
+        reopenClosedTab();
       }
     },
     true,
@@ -1983,6 +2113,22 @@ function startEditor() {
     scheduleAutoSave();
   });
 
+  // Atalhos de linha do VSCode: mover e duplicar a linha (comentar é do Monaco).
+  const bindLine = (keys, action) => view.addCommand(keys, () => {
+    const command = view.getAction(action);
+    if (command) command.run();
+  });
+  bindLine(monaco.KeyMod.Alt | monaco.KeyCode.UpArrow, 'editor.action.moveLinesUpAction');
+  bindLine(monaco.KeyMod.Alt | monaco.KeyCode.DownArrow, 'editor.action.moveLinesDownAction');
+  bindLine(
+    monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.UpArrow,
+    'editor.action.copyLinesUpAction',
+  );
+  bindLine(
+    monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.DownArrow,
+    'editor.action.copyLinesDownAction',
+  );
+
   applySettings({ persist: false });
 }
 
@@ -1991,6 +2137,9 @@ function startEditor() {
 // ---------------------------------------------------------------------------
 /** Nome da aba: arquivo novo ainda sem caminho mostra o nome digitado. */
 const entryName = (path, entry) => (entry?.blank ? entry.name : baseName(path));
+
+/** Abas fechadas pelo usuário (Ctrl+Shift+T desfaz o fechamento mais recente). */
+const closedTabs = [];
 
 /** Monta a barra de abas a partir dos modelos abertos (a ordem do Map é a ordem de abertura). */
 function renderTabs() {
@@ -2093,6 +2242,21 @@ async function closeFile(path) {
     if (!ok) return;
   }
 
+  // Guarda o suficiente para reabrir: texto do arquivo em branco, cursor e
+  // rolagem. Arquivos salvos são relidos do disco ao reabrir.
+  closedTabs.push({
+    path,
+    blank: !!entry.blank,
+    config: !!entry.config,
+    outside: !!entry.outside,
+    name: entry.name || '',
+    text: entry.blank ? entry.model.getValue() : '',
+    saved: entry.saved,
+    cursor: entry.cursor ? { ...entry.cursor } : null,
+    scrollTop: Math.max(0, Math.round(entry.scrollTop || 0)),
+  });
+  if (closedTabs.length > 20) closedTabs.shift();
+
   models.delete(path);
 
   if (activePath === path) {
@@ -2125,10 +2289,132 @@ async function closeFile(path) {
   setStatus(`fechado ${entryName(path, entry)}`);
 }
 
+/** Cursor/rolagem guardados ao fechar (ou na sessão) são reaplicados aqui. */
+function applyEntryView(entry, snapshot) {
+  if (!entry || !view || !snapshot) return;
+  const cursor = snapshot.cursor;
+  if (cursor && cursor.line) {
+    view.setPosition({
+      lineNumber: Math.min(Math.max(1, cursor.line), entry.model.getLineCount()),
+      column: Math.max(1, cursor.column || 1),
+    });
+  }
+  if (snapshot.scrollTop) view.setScrollTop(snapshot.scrollTop);
+  view.focus();
+}
+
+/**
+ * Caminho do arquivo ativo em trechos clicáveis (breadcrumb). Clicar num trecho
+ * expande a pasta correspondente no explorador; no último, destaca o arquivo.
+ */
+let crumbKey = '';
+
+function renderCrumb() {
+  const entry = activePath ? models.get(activePath) : null;
+  const key = `${activePath || ''}|${entry && entry.blank ? entry.name : ''}`;
+  if (key === crumbKey) return;
+  crumbKey = key;
+
+  const crumb = els.crumb;
+  crumb.replaceChildren();
+
+  if (!entry) {
+    crumb.hidden = true;
+    return;
+  }
+
+  crumb.hidden = false;
+  const segments = [];
+
+  if (entry.blank) {
+    segments.push({ label: `${entry.name} (não salvo)`, path: '', leaf: true, outside: true });
+  } else {
+    const full = String(activePath);
+    const sep = full.includes('\\') ? '\\' : '/';
+    const parts = full.split(/[\\/]+/).filter(Boolean);
+    let prefix = '';
+    for (const part of parts) {
+      prefix = prefix ? `${prefix}${sep}${part}` : (full.startsWith('/') ? `/${part}` : part);
+      // A unidade ("C:") não é uma pasta que o explorador possa mostrar.
+      const isDrive = /^[a-zA-Z]:$/.test(part);
+      segments.push({ label: part, path: isDrive ? '' : prefix, leaf: prefix === full });
+    }
+  }
+
+  segments.forEach((segment, index) => {
+    if (index) {
+      const sep = document.createElement('span');
+      sep.className = 'sep';
+      sep.textContent = '›';
+      crumb.append(sep);
+    }
+
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'seg' + (segment.leaf ? ' leaf' : '') + (entry.outside ? ' outside' : '');
+    button.textContent = segment.label;
+    button.title = segment.path
+      ? `${segment.path} — revelar no explorador`
+      : (entry.blank ? `${entry.name} (ainda sem caminho no disco)` : segment.label);
+    // Fora do projeto o explorador não tem onde mostrar o item: sem clique.
+    if (segment.path && !entry.outside) {
+      button.addEventListener('click', () => revealInExplorer(segment.path));
+    }
+    crumb.append(button);
+  });
+}
+
+/** Ctrl+Shift+T: desfaz o último fechamento (a pilha tem as 20 últimas abas). */
+async function reopenClosedTab() {
+  closePalette();
+  const snapshot = closedTabs.pop();
+  if (!snapshot) {
+    setStatus('nenhuma aba fechada para reabrir');
+    return;
+  }
+
+  if (snapshot.blank) {
+    const key = `novo:${++blankSeq}`;
+    const name = snapshot.name || 'sem título';
+    const model = window.monaco.editor.createModel(snapshot.text || '', languageFor(name));
+    applyModelOptions(model);
+    models.set(key, { model, saved: snapshot.saved, name, blank: true });
+    activePath = key;
+    view.setModel(model);
+    els.statusfile.textContent = `${name} (não salvo)`;
+    renderTabs();
+    updateDirty();
+    applyEntryView(models.get(key), snapshot);
+    setStatus(`reaberto ${name} (ainda sem caminho)`);
+    return;
+  }
+
+  if (snapshot.config) {
+    await openConfigFile();
+    return;
+  }
+
+  // Arquivo escolhido fora do projeto: a leitura é restrita à raiz.
+  if (snapshot.outside) {
+    setStatus('arquivo fora do projeto: abra pelo diálogo (Ctrl+Shift+P → abrir arquivo…)');
+    return;
+  }
+
+  const path = resolvePath(snapshot.path);
+  if (!models.has(path)) await openFile(snapshot.path);
+  const entry = models.get(path);
+  if (!entry) return;
+
+  selectFile(path);
+  applyEntryView(entry, snapshot);
+  setStatus(`reaberto ${entryName(path, entry)}`);
+}
+
 function updateDirty() {
   const entry = activePath ? models.get(activePath) : null;
   const dirty = !!entry && entry.model.getValue() !== entry.saved;
   refreshTabStates();
+  renderCrumb();
 
   const name = activePath ? entryName(activePath, models.get(activePath)) : '';
   const label = name || baseName(state.root);
@@ -2180,6 +2466,16 @@ async function openFile(requestedPath) {
  * completo; os demais usam `/api/write`, restrito ao projeto.
  */
 async function writeEntry(path, entry, text) {
+  // `settings.json` tem rota própria: o backend valida o JSON e atualiza o cache.
+  if (entry.config) {
+    const res = await fetch('/api/savesettings', { method: 'POST', body: text });
+    if (!res.ok) throw new Error((await res.text()).trim());
+    await loadSettings();
+    applySettings({ persist: false });
+    if (!els.settings.hidden) fillSettingsForm();
+    return;
+  }
+
   const route = entry.outside ? '/api/saveas' : '/api/write';
   const res = await fetch(api(route, { path }), { method: 'POST', body: text });
   if (!res.ok) throw new Error((await res.text()).trim());
@@ -2208,7 +2504,8 @@ async function saveActiveFile() {
 async function saveAllFiles() {
   let saved = 0;
 
-  for (const [path, entry] of models) {
+  // Cópia das entradas: salvar um arquivo em branco muda a chave no Map.
+  for (const [path, entry] of Array.from(models)) {
     const text = entry.model.getValue();
     if (text === entry.saved) continue;
 
@@ -2564,37 +2861,135 @@ async function saveBlankFile(key, entry) {
       method: 'POST',
       body: entry.model.getValue(),
     });
-    const path = result.path;
-    const wasActive = activePath === key;
-
-    // Mesmo modelo, caminho novo: a aba troca de chave sem recarregar o texto.
-    models.delete(key);
-    entry.blank = false;
-    entry.saved = entry.model.getValue();
-    entry.name = baseName(path);
-    entry.outside = !sameOrInside(path, state.root);
-    models.set(path, entry);
-
-    if (wasActive) {
-      activePath = path;
-      els.statusfile.textContent = path;
-    }
-    state.fileIndex = null;
-
-    // Fora do projeto, a árvore não tem onde mostrar o arquivo.
-    if (sameOrInside(path, state.root)) {
-      state.selectedDir = parentOf(path);
-      await refreshTree();
-    }
-
-    renderTabs();
-    updateDirty();
-    scheduleSessionSave();
-    setStatus(`salvo ${baseName(path)}`);
+    await adoptPath(key, entry, result.path);
     return true;
   } catch (err) {
     setStatus('erro ao salvar: ' + err.message);
     return false;
+  }
+}
+
+/**
+ * Muda o caminho da aba sem recriar o modelo: o texto, o cursor e o histórico
+ * do Monaco continuam onde estão, e a aba passa a ser um arquivo do projeto (ou
+ * de fora dele, quando o caminho completo foi escolhido no diálogo).
+ */
+async function adoptPath(key, entry, path) {
+  const wasActive = activePath === key;
+
+  models.delete(key);
+  entry.blank = false;
+  // A aba deixou de ser o `settings.json`: volta a salvar como arquivo comum.
+  entry.config = false;
+  entry.name = baseName(path);
+  entry.saved = entry.model.getValue();
+  entry.outside = !sameOrInside(path, state.root);
+  models.set(path, entry);
+
+  if (wasActive) {
+    activePath = path;
+    els.statusfile.textContent = path;
+  }
+  state.fileIndex = null;
+
+  // Fora do projeto, a árvore não tem onde mostrar o arquivo.
+  if (!entry.outside) {
+    state.selectedDir = parentOf(path);
+    await refreshTree();
+  }
+
+  renderTabs();
+  updateDirty();
+  scheduleSessionSave();
+  setStatus(`salvo ${baseName(path)}`);
+}
+
+/**
+ * "Salvar como…": grava o texto em outro caminho e leva a aba para lá.
+ * "Salvar uma cópia": grava sem trocar a aba atual (o original segue aberto).
+ */
+async function saveFileAs(copy = false) {
+  if (!activePath) {
+    setStatus('nenhum arquivo aberto para salvar');
+    return;
+  }
+
+  const entry = models.get(activePath);
+  if (!entry) return;
+
+  // Arquivo novo ainda sem caminho: o fluxo já é um "salvar como".
+  if (entry.blank) {
+    if (!copy) await saveBlankFile(activePath, entry);
+    return;
+  }
+
+  const target = await showDialog({
+    title: copy ? 'Salvar uma cópia' : 'Salvar como',
+    message: 'Pasta e nome do arquivo. Também aceita um caminho completo.',
+    value: activePath,
+    confirmLabel: 'salvar',
+  });
+  if (!target) return;
+
+  const text = entry.model.getValue();
+  if (normalizePath(target) === normalizePath(activePath)) {
+    // Mesmo caminho pedido no diálogo: é só salvar.
+    await saveActiveFile();
+    return;
+  }
+
+  try {
+    const result = await apiJson(api('/api/saveas', { path: target }), {
+      method: 'POST',
+      body: text,
+    });
+
+    if (copy) {
+      if (sameOrInside(result.path, state.root)) await refreshTree();
+      setStatus(`cópia salva: ${result.path}`);
+      return;
+    }
+
+    await adoptPath(activePath, entry, result.path);
+  } catch (err) {
+    setStatus('erro ao salvar: ' + err.message);
+  }
+}
+
+/**
+ * Abre o `settings.json` do editor numa aba: o arquivo fica fora do projeto
+ * (em `%APPDATA%\Wincode`), e o salvamento passa por `savesettings`, que valida
+ * o JSON antes de gravar e reaplica as preferências na hora.
+ */
+async function openConfigFile() {
+  try {
+    const data = await apiJson('/api/configfile');
+    const path = String(data.path || '');
+    if (!path) throw new Error('pasta de configuração não encontrada');
+
+    if (models.has(path)) {
+      selectFile(path);
+      return;
+    }
+
+    const text = String(data.text || '{}\n');
+    const model = window.monaco.editor.createModel(
+      text,
+      'json',
+      window.monaco.Uri.file(path.replace(/\\/g, '/')),
+    );
+    applyModelOptions(model);
+    models.set(path, { model, saved: text, config: true, outside: true });
+
+    activePath = path;
+    view.setModel(model);
+    els.statusfile.textContent = path;
+    renderTabs();
+    updateDirty();
+    view.focus();
+    setStatus('configuração do editor — Ctrl+S valida o JSON e aplica');
+  } catch (err) {
+    setStatus('não foi possível abrir a configuração: ' + err.message);
   }
 }
 
@@ -3152,6 +3547,56 @@ async function releasePinnedFile() {
   await refreshTree();
 }
 
+/**
+ * Abre as pastas do caminho no explorador e destaca a linha do item — o
+ * "revelar no explorador" do clique no breadcrumb e da paleta.
+ */
+async function revealInExplorer(path) {
+  const target = String(path || '');
+  if (!target || !state.root || state.selectionRequired) return;
+
+  if (state.singleFile) {
+    setStatus('no modo arquivo único o explorador mostra só o arquivo aberto');
+    return;
+  }
+
+  if (!sameOrInside(target, state.root)) {
+    setStatus('fora do projeto aberto: nada a revelar no explorador');
+    return;
+  }
+
+  // Os caminhos da árvore vêm do backend com a caixa original: cortar o
+  // prefixo pelo tamanho (e não pela string normalizada) mantém "Projeto".
+  const rootRaw = trimSlash(String(state.root).replace(/\\/g, '/'));
+  const targetRaw = trimSlash(String(target).replace(/\\/g, '/'));
+  if (normalizePath(targetRaw) === normalizePath(rootRaw)) {
+    highlightActiveRow();
+    return;
+  }
+
+  const sep = String(state.root).includes('\\') ? '\\' : '/';
+  const parts = targetRaw.slice(rootRaw.length).split('/').filter(Boolean);
+  parts.pop(); // o próprio alvo não é expandido: só as pastas até ele
+
+  let dir = trimSlash(state.root);
+  for (const part of parts) {
+    dir = `${dir}${sep}${part}`;
+    let node = findDirNode(els.tree, dir);
+    if (!node) {
+      // A árvore pode estar desatualizada: uma releitura resolve.
+      await refreshTree();
+      node = findDirNode(els.tree, dir);
+    }
+    if (!node) return;
+    if (node.editorNode.children.hidden) await node.editorNode.setOpen(true);
+  }
+
+  highlightActiveRow();
+  const selector = `.row[data-path="${window.CSS && CSS.escape ? CSS.escape(target) : target.replace(/["\\]/g, '\\$&')}"]`;
+  const row = els.tree.querySelector(selector);
+  if (row) row.scrollIntoView({ block: 'nearest' });
+}
+
 async function refreshTree() {
   if (state.selectionRequired || !state.root) {
     els.tree.replaceChildren(emptyRow('nenhum projeto aberto', 0));
@@ -3207,7 +3652,9 @@ function watchPaths() {
   if (state.root && !state.selectionRequired && !state.singleFile) paths.add(state.root);
   if (state.singleFile) paths.add(state.singleFile);
   for (const path of state.expanded) paths.add(path);
-  for (const [path, entry] of models) if (!entry.blank) paths.add(path);
+  // As rotas de checagem são restritas à raiz: arquivo novo sem caminho e
+  // arquivo de fora (settings.json) não entram.
+  for (const [path, entry] of models) if (!entry.blank && !entry.outside) paths.add(path);
   return Array.from(paths).slice(0, 200);
 }
 
@@ -3296,9 +3743,10 @@ async function saveSession() {
   const payload = {
     version: 1,
     active: activePath || '',
-    // Arquivos novos sem caminho não podem ser restaurados.
+    // Arquivos novos sem caminho e arquivos de fora do projeto (settings.json)
+    // não podem ser restaurados pela raiz.
     tabs: Array.from(models)
-      .filter(([, entry]) => !entry.blank)
+      .filter(([, entry]) => !entry.blank && !entry.outside)
       .map(([path, entry]) => ({
         path,
         line: entry.cursor?.line || 1,
@@ -3448,6 +3896,8 @@ function resetWorkspace(info) {
   const previous = Array.from(models.values());
   models.clear();
   activePath = null;
+  // A pilha de abas fechadas é do projeto que saiu.
+  closedTabs.length = 0;
   els.statusfile.textContent = '';
   renderTabs();
 
@@ -3858,8 +4308,10 @@ async function runCommandLine(input) {
 
   state.running = true;
   setStatus('executando…');
+  setStopVisible(true);
   try {
     const { id } = await apiJson(api('/api/exec', { cmd }), { method: 'POST' });
+    state.jobId = id;
     let done = false;
     while (!done) {
       await new Promise((resolve) => setTimeout(resolve, 80));
@@ -3876,6 +4328,37 @@ async function runCommandLine(input) {
     setStatus('erro no comando');
   } finally {
     state.running = false;
+    state.jobId = 0;
+    setStopVisible(false);
+  }
+}
+
+/** O botão "parar" só existe enquanto há comando rodando. */
+function setStopVisible(on) {
+  const button = $('btntermstop');
+  if (button) button.hidden = !on;
+}
+
+/**
+ * Interrompe o comando atual. O processo é morto em árvore (`taskkill /T`),
+ * então `cargo build`/`npm run dev` não deixam filhos rodando; a saída que já
+ * estava no pipe ainda chega pelo laço de `poll`.
+ */
+async function stopCommand() {
+  if (!state.running) {
+    setStatus('nenhum comando em execução');
+    return;
+  }
+  if (!state.jobId) {
+    setStatus('aguarde o comando começar para interromper');
+    return;
+  }
+
+  try {
+    await apiJson(api('/api/termkill', { id: state.jobId }), { method: 'POST' });
+    setStatus('interrompendo…');
+  } catch (err) {
+    setStatus('não foi possível interromper: ' + err.message);
   }
 }
 
@@ -3907,7 +4390,13 @@ function bindTerminal() {
       return;
     }
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'c') {
-      // Como num terminal: a linha digitada é abandonada, não apagada do buffer.
+      // Comando rodando: Ctrl+C manda interromper (como num terminal de verdade).
+      if (state.running) {
+        event.preventDefault();
+        stopCommand();
+        return;
+      }
+      // Sem comando: a linha digitada é abandonada, não apagada do buffer.
       if (!els.cmdinput.value) return;
       event.preventDefault();
       termWrite(`${promptText()} ${els.cmdinput.value}^C\n`);
@@ -3926,6 +4415,7 @@ function bindTerminal() {
     clearTerminal();
     focusTerminal();
   });
+  $('btntermstop').addEventListener('click', stopCommand);
   $('btntermfull').addEventListener('click', toggleTerminalFullscreen);
   $('btntogglesidebar').addEventListener('click', toggleSidebar);
   $('btntoggleterminal').addEventListener('click', toggleTerminal);

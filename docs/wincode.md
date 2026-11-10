@@ -47,6 +47,31 @@ acompanha as correções e melhorias pedidas.
     (barras de progresso deixam de empilhar), `\b`/`ESC [ K` apagam o trecho e o restante dos
     controles (BEL, NUL, C1) não aparece.
 
+## Segunda rodada (ganhos rápidos)
+
+- **interromper o comando em execução** — *feito*. Enquanto algo roda, o cabeçalho do
+  terminal mostra **■ parar**, e `Ctrl+C` no prompt interrompe também. O processo é morto em
+  árvore (`taskkill /T /F` via `/api/termkill`), então filhos de `cargo build`/`npm run dev`
+  não ficam rodando; sem comando, `Ctrl+C` segue abandonando a linha digitada. O comando
+  também aparece na paleta durante a execução.
+- **salvar como…** — *feito*. Grava em outro caminho e leva a aba para lá; **salvar uma
+  cópia…** grava sem mexer na aba. Caminho relativo continua preso ao projeto; completo pode
+  sair dele (mesma rota `/api/saveas` do arquivo em branco).
+- **reabrir aba fechada** — *feito*. `Ctrl+Shift+T` desfaz o último fechamento (pilha de 20).
+  Arquivo salvo volta do disco com cursor e rolagem; aba em branco volta com o texto, ainda
+  sem caminho.
+- **ir para símbolo** — *feito*. `Ctrl+Shift+O` lista as declarações do arquivo ativo
+  (funções, classes, tipos, `impl`, métodos, variáveis e cabeçalhos Markdown) com filtro por
+  subsequência; o Monaco standalone não tem o *outline* do VSCode, então o mapa é textual.
+- **revelar no explorador / breadcrumb** — *feito*. Faixa abaixo das abas com o caminho do
+  arquivo ativo em trechos clicáveis: cada um expande a pasta no explorador e destaca a
+  linha. Na paleta, **revelar arquivo ativo no explorador** faz o mesmo.
+- **atalhos de linha** — *feito*. `Alt+↑`/`Alt+↓` movem a linha, `Shift+Alt+↓` duplica e
+  `Ctrl+/` comenta (comandos nativos do Monaco ligados ao editor).
+- **settings.json no editor** — *feito*. **abrir settings.json** na paleta abre o arquivo real
+  de preferências numa aba; o `Ctrl+S` passa por `/api/savesettings`, que valida o JSON e
+  reaplica as opções na hora. JSON inválido é recusado e a aba continua pendente.
+
 ## Como conferir
 
 - `Ctrl+Shift+P` → *novo arquivo em branco…* → digitar texto → `Ctrl+S` (o diálogo sugere
@@ -57,6 +82,14 @@ acompanha as correções e melhorias pedidas.
   (`echo configuração não é opcional`) e uma ferramenta com barra de progresso; depois
   **⛶** e `Esc`.
 - Editor: alternar entre temas claros e escuros e conferir as barras de rolagem.
+- Terminal: `ping -n 60 127.0.0.1` e **■ parar** (ou `Ctrl+C`); `cargo build` interrompido no
+  meio para ver que o `rustc` não fica rodando no Gerenciador de Tarefas.
+- Abas: `Ctrl+W` num arquivo com alterações e salvas, `Ctrl+Shift+T` para reabrir; conferir
+  cursor e rolagem. Fazer o mesmo com uma aba em branco.
+- `Ctrl+Shift+O` num `.ts` e num `.md`; clicar nos trechos do breadcrumb para ver o
+  explorador abrir a pasta; `Alt+↓` e `Shift+Alt+↓`.
+- Paleta → *abrir settings.json*, mudar `"fontSize"`, `Ctrl+S` e ver a fonte do editor mudar;
+  depois quebrar o JSON de propósito e conferir a recusa.
 
 ## Pendências conhecidas
 
@@ -66,3 +99,8 @@ acompanha as correções e melhorias pedidas.
   ver alguns acentos diferentes.
 - Arquivo criado em branco e salvo fora da raiz do projeto fica editável, mas não entra na
   árvore, no `Ctrl+P` nem no recarregamento automático.
+- **Ir para símbolo** depende do formato da linha; declarações multi-linha ou geradas podem
+  não aparecer (não é um servidor de linguagem).
+- **Salvar como** sobrescreve um arquivo existente sem pedir confirmação.
+- A aba de um arquivo aberto fora da raiz não é reaberta por `Ctrl+Shift+T` (a leitura é
+  restrita ao projeto).

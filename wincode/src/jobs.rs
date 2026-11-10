@@ -9,6 +9,8 @@ use std::thread;
 struct Job {
     output: Arc<Mutex<String>>,
     finished: Arc<Mutex<Option<i32>>>,
+    /// Processo do `cmd.exe`: é o que permite interromper um comando em execução.
+    pid: u32,
 }
 
 /// Comandos do terminal rodam em threads próprias: o handler do protocolo
@@ -40,6 +42,7 @@ impl Jobs {
             .spawn()
             .map_err(|e| format!("falha ao executar: {e}"))?;
 
+        let pid = child.id();
         let output = Arc::new(Mutex::new(String::new()));
         let finished = Arc::new(Mutex::new(None));
 
@@ -72,6 +75,7 @@ impl Jobs {
             Job {
                 output,
                 finished,
+                pid,
             },
         );
 
@@ -96,6 +100,57 @@ impl Jobs {
         }
 
         Ok((out, code))
+    }
+
+    /// Interrompe o comando (e o que ele tiver aberto). O `poll` seguinte já
+    /// devolve `done` com o código de saída do processo morto.
+    pub(super) fn kill(&self, id: u64) -> Result<(), String> {
+        let pid = {
+            let jobs = self.inner.lock().unwrap();
+            jobs.get(&id)
+                .map(|job| job.pid)
+                .ok_or("comando não encontrado")?
+        };
+
+        kill_tree(pid)
+    }
+}
+
+/// `taskkill /T` leva junto os processos filhos: `cargo build` deixa
+/// compiladores rodando, e matar só o `cmd.exe` os deixaria órfãos.
+#[cfg(target_os = "windows")]
+fn kill_tree(pid: u32) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let status = Command::new("taskkill")
+        .args(["/PID", &pid.to_string(), "/T", "/F"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .status()
+        .map_err(|err| format!("não foi possível interromper: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("o processo já havia terminado".into())
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+fn kill_tree(pid: u32) -> Result<(), String> {
+    let status = Command::new("kill")
+        .args(["-9", &pid.to_string()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map_err(|err| format!("não foi possível interromper: {err}"))?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err("o processo já havia terminado".into())
     }
 }
 

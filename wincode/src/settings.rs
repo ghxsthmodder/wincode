@@ -22,6 +22,22 @@ impl Settings {
         }
     }
 
+    /// Caminho do `settings.json`; `None` quando o sistema não informa a pasta
+    /// de configuração do usuário.
+    pub(super) fn path(&self) -> Option<&std::path::Path> {
+        self.path.as_deref()
+    }
+
+    /// Conteúdo do arquivo como está no disco (para abrir no editor), e não o
+    /// JSON compacto do cache: o que se edita é o mesmo texto que se vê.
+    pub(super) fn read_raw(&self) -> String {
+        let Some(path) = &self.path else {
+            return "{}\n".into();
+        };
+
+        std::fs::read_to_string(path).unwrap_or_else(|_| "{}\n".into())
+    }
+
     /// JSON atual; `{}` quando nada foi salvo ainda ou o arquivo está inválido.
     pub(super) fn load(&self) -> String {
         let mut cached = self.cached.lock().unwrap();
