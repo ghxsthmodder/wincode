@@ -218,6 +218,20 @@
   #statusmsg { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
   #statusfile { overflow: hidden; text-overflow: ellipsis; max-width: 40vw; }
   .statusbar .spacer { flex: 1 1 auto; }
+  /* Branch e alterações do git no canto da barra; clique abre o painel. */
+  .gitbadge {
+    flex: 0 0 auto; border: 0; background: transparent; color: var(--muted);
+    font: inherit; font-size: 11px; padding: 0 3px; border-radius: 3px; cursor: pointer;
+  }
+  .gitbadge:hover { background: rgba(127,127,127,.18); color: var(--text); }
+  .gitbadge.dirty { color: var(--accent2); }
+  /* Letra de estado na linha do explorador (M/A/D/?/R). */
+  .row .gitmark { margin-left: auto; font-size: 10px; font-weight: 600; color: var(--accent2); }
+  .row .gitmark.m { color: var(--accent2); }
+  .row .gitmark.a { color: var(--accent); }
+  .row .gitmark.d { color: var(--danger); }
+  .row .gitmark.u { color: var(--muted); }
+  .row .gitmark.r { color: var(--accent); }
   .dim { color: var(--muted); }
 
   :root { --editor-head-height: 30px; --terminal-height: 210px; }
@@ -282,6 +296,36 @@
   .dialog button.danger { background: rgba(243,139,168,.16); border-color: var(--danger); color: var(--danger); }
   .tree.no-icons .fticon { display: none; }
 
+  /* Painel do git: lista de alterações, mensagem e saída do commit. */
+  .gitdialog { width: 560px; }
+  .gitdialog h2 .dim { font-weight: 400; font-size: 12px; }
+  .gitlist {
+    max-height: 40vh; overflow: auto; margin: 0 0 10px;
+    border: 1px solid var(--border); border-radius: 4px;
+  }
+  .gitlist .gitrow {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 4px 8px;
+    border: 0; border-bottom: 1px solid var(--border); background: transparent;
+    color: var(--text); font: inherit; font-size: 11.5px; text-align: left; cursor: pointer;
+  }
+  .gitlist .gitrow:last-child { border-bottom: 0; }
+  .gitlist .gitrow:hover { background: rgba(127,127,127,.12); }
+  .gitlist .gitrow .code { flex: 0 0 12px; font-weight: 600; color: var(--accent2); }
+  .gitlist .gitrow .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gitlist .gitempty { padding: 10px; text-align: center; }
+  .gitdialog textarea {
+    width: 100%; min-height: 58px; resize: vertical; padding: 6px 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    color: var(--text); font: inherit; outline: none;
+  }
+  .gitdialog textarea:focus { border-color: var(--accent); }
+  .gitout {
+    max-height: 18vh; overflow: auto; margin: 8px 0 0; padding: 6px 8px;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 4px;
+    font: inherit; font-size: 11px; color: var(--muted); white-space: pre-wrap;
+  }
+  .gitout[hidden] { display: none; }
+
   .settings {
     width: 620px; max-width: calc(100vw - 32px); max-height: calc(100vh - 64px);
     display: flex; flex-direction: column;
@@ -325,6 +369,19 @@
   .palette-item.active { background: rgba(137,180,250,.18); }
   body.light .palette-item.active { background: rgba(37,99,235,.14); }
   .palette-empty { padding: 12px; text-align: center; }
+  /* Opções da busca (Aa/.*) e o atalho para substituir em arquivos. */
+  .searchopts {
+    display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+    border-top: 1px solid var(--border);
+  }
+  .searchopts[hidden] { display: none; }
+  .searchopts button {
+    background: transparent; border: 1px solid var(--border); color: var(--muted);
+    border-radius: 4px; padding: 1px 7px; font: inherit; font-size: 11px; cursor: pointer;
+  }
+  .searchopts button:hover { color: var(--text); }
+  .searchopts button.on { border-color: var(--accent); color: var(--accent); }
+  .searchopts .spacer { flex: 1; }
 
   /* Painel inicial no lugar do editor, como a aba Welcome do VSCode. */
   .welcome {
@@ -493,6 +550,7 @@
     <footer class="statusbar">
       <span id="statusmsg">inicializando…</span>
       <span class="spacer"></span>
+      <button id="statusgit" class="gitbadge" type="button" hidden></button>
       <span id="statusfile"></span>
       <span id="statuspos">Ln 1, Col 1</span>
     </footer>
@@ -666,7 +724,29 @@
   <div id="palette" class="overlay palette" hidden>
     <div class="dialog palette-box">
       <input id="paletteinput" type="text" placeholder="digite um comando…" autocomplete="off" spellcheck="false">
+      <div id="searchopts" class="searchopts" hidden>
+        <button id="searchcase" type="button" title="Diferenciar maiúsculas de minúsculas">Aa</button>
+        <button id="searchregex" type="button" title="Usar expressão regular">.*</button>
+        <span class="spacer"></span>
+        <button id="searchreplace" type="button" title="Substituir em todos os arquivos do projeto">substituir…</button>
+      </div>
       <div id="palettelist" class="palettelist"></div>
+    </div>
+  </div>
+
+  <div id="git" class="overlay" hidden>
+    <div class="dialog gitdialog">
+      <h2>Git <span id="gitbranch" class="dim"></span></h2>
+      <p id="gitsummary" class="dim"></p>
+      <div id="gitlist" class="gitlist"></div>
+      <textarea id="gitmessage" rows="3" placeholder="mensagem do commit" spellcheck="false"></textarea>
+      <pre id="gitoutput" class="gitout" hidden></pre>
+      <div class="actions">
+        <button id="gitclose" type="button">fechar</button>
+        <span class="spacer"></span>
+        <button id="gitrefresh" type="button">atualizar</button>
+        <button id="gitcommit" type="button" class="primary">commit</button>
+      </div>
     </div>
   </div>
 
@@ -682,6 +762,17 @@ const els = {
   palette: $('palette'),
   paletteinput: $('paletteinput'),
   palettelist: $('palettelist'),
+  searchopts: $('searchopts'),
+  searchcase: $('searchcase'),
+  searchregex: $('searchregex'),
+  searchreplace: $('searchreplace'),
+  git: $('git'),
+  gitbranch: $('gitbranch'),
+  gitsummary: $('gitsummary'),
+  gitlist: $('gitlist'),
+  gitmessage: $('gitmessage'),
+  gitoutput: $('gitoutput'),
+  statusgit: $('statusgit'),
   termout: $('termout'),
   inputline: $('inputline'),
   cmdinput: $('cmdinput'),
@@ -1556,10 +1647,12 @@ function paletteCommands() {
     { title: 'salvar uma cópia…', run: () => saveFileAs(true) },
     { title: 'abrir arquivo rapidamente…', hint: 'Ctrl+P', run: openQuickOpen },
     { title: 'buscar em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
+    { title: 'buscar e substituir em arquivos…', hint: 'Ctrl+Shift+F', run: openSearch },
     { title: 'ir para símbolo no arquivo…', hint: 'Ctrl+Shift+O', run: openSymbols },
     { title: 'reabrir aba fechada', hint: 'Ctrl+Shift+T', run: reopenClosedTab },
     { title: 'revelar arquivo ativo no explorador', run: () => revealInExplorer(activePath) },
     { title: 'abrir settings.json (configuração do editor)', run: openConfigFile },
+    { title: 'painel do git (alterações e commit)', run: openGit },
     { title: 'abrir arquivo…', run: chooseFile },
     { title: 'novo arquivo em branco…', run: newBlankFile },
     { title: 'abrir outra pasta…', run: chooseFolder },
@@ -1745,7 +1838,22 @@ let paletteIndex = 0;
 
 let searchTimer = null;
 let searchToken = 0;
-let searchState = { query: '', results: [], loading: false, truncated: false };
+let searchState = {
+  query: '', results: [], loading: false, truncated: false, error: '',
+  // Preferências da busca ficam entre aberturas: quem usa regex continua usando.
+  regex: false, caseSensitive: false,
+};
+
+/// Opções de busca para a rota (1/0, como o backend espera).
+const searchOptions = () => ({
+  regex: searchState.regex ? 1 : 0,
+  case: searchState.caseSensitive ? 1 : 0,
+});
+
+function syncSearchOptions() {
+  els.searchcase.classList.toggle('on', !!searchState.caseSensitive);
+  els.searchregex.classList.toggle('on', !!searchState.regex);
+}
 
 /** Comandos filtrados pela paleta (Ctrl+Shift+P). */
 function commandItems(query) {
@@ -1828,6 +1936,78 @@ async function openAt(path, line, column) {
   scheduleSessionSave();
 }
 
+/**
+ * Substituir em todos os arquivos do projeto, com as mesmas opções da busca.
+ * O backend reescreve só arquivos do índice e devolve a contagem; abas abertas
+ * sem alterações pendentes são relidas para não ficarem mostrando o texto velho.
+ */
+async function replaceInFiles() {
+  const query = els.paletteinput.value.trim();
+  if (query.length < 2) {
+    setStatus('digite ao menos 2 caracteres para substituir');
+    return;
+  }
+  if (state.selectionRequired || !state.root) {
+    setStatus('abra uma pasta para substituir em arquivos');
+    return;
+  }
+
+  const replacement = await showDialog({
+    title: 'Substituir em arquivos',
+    message: `${query}\n\nTodos os arquivos do projeto serão alterados. Deixe vazio para apagar as ocorrências.`,
+    value: '',
+    confirmLabel: 'substituir tudo',
+    danger: true,
+    allowEmpty: true,
+  });
+  if (replacement === null) return;
+
+  try {
+    setStatus('substituindo…');
+    const result = await apiJson(
+      api('/api/replace', { q: query, replace: replacement, ...searchOptions() }),
+      { method: 'POST' },
+    );
+    state.fileIndex = null;
+    await reloadCleanTabs();
+    await refreshTree();
+    refreshGit();
+    scheduleSearch();
+
+    const files = Number(result.files) || 0;
+    const total = Number(result.replacements) || 0;
+    const failed = Array.isArray(result.errors) && result.errors.length;
+    setStatus(
+      files
+        ? `${total} substituição(ões) em ${files} arquivo(s)${failed ? ' — houve falhas' : ''}`
+        : 'nada foi substituído',
+    );
+  } catch (err) {
+    setStatus('substituição falhou: ' + err.message);
+  }
+}
+
+/** Abas salvas são relidas do disco (as alteradas não são tocadas). */
+async function reloadCleanTabs() {
+  for (const [path, entry] of Array.from(models)) {
+    if (entry.blank || entry.outside) continue;
+    if (entry.model.getValue() !== entry.saved) continue;
+
+    try {
+      const res = await fetch(api('/api/read', { path }));
+      if (!res.ok) continue;
+      const text = await res.text();
+      if (text === entry.model.getValue()) continue;
+      entry.model.setValue(text);
+      entry.saved = text;
+      entry.model.pushStackElement?.();
+    } catch {
+      // Arquivo removido: some da árvore na próxima atualização.
+    }
+  }
+  updateDirty();
+}
+
 function renderPalette() {
   const query = els.paletteinput.value.trim();
   paletteItems = paletteMode === 'files'
@@ -1851,11 +2031,13 @@ function renderPalette() {
       : paletteMode === 'symbols'
         ? (query ? 'nenhum símbolo com esse nome' : 'nenhum símbolo reconhecido neste arquivo')
         : paletteMode === 'search'
-          ? (searchState.loading
-              ? 'buscando…'
-              : (searchState.query.length < 2
-                  ? (state.selectionRequired ? 'abra uma pasta para buscar arquivos' : 'digite ao menos 2 caracteres')
-                  : 'nenhum resultado'))
+          ? (searchState.error
+              ? searchState.error
+              : searchState.loading
+                ? 'buscando…'
+                : (searchState.query.length < 2
+                    ? (state.selectionRequired ? 'abra uma pasta para buscar arquivos' : 'digite ao menos 2 caracteres')
+                    : 'nenhum resultado'))
           : 'nenhum comando encontrado';
     els.palettelist.append(empty);
     return;
@@ -1905,6 +2087,8 @@ function setPaletteMode(mode) {
     searchToken += 1;
     clearTimeout(searchTimer);
   }
+  els.searchopts.hidden = mode !== 'search';
+  syncSearchOptions();
   els.paletteinput.placeholder = mode === 'files'
     ? 'digite para abrir um arquivo…'
     : mode === 'symbols'
@@ -1948,7 +2132,7 @@ function openQuickOpen() {
 function openSearch() {
   setPaletteMode('search');
   searchToken += 1;
-  searchState = { query: '', results: [], loading: false, truncated: false };
+  searchState = { ...searchState, query: '', results: [], loading: false, truncated: false, error: '' };
   clearTimeout(searchTimer);
   els.paletteinput.value = '';
   els.palette.hidden = false;
@@ -1962,30 +2146,32 @@ function scheduleSearch() {
   clearTimeout(searchTimer);
 
   if (query.length < 2) {
-    searchState = { query, results: [], loading: false, truncated: false };
+    searchState = { ...searchState, query, results: [], loading: false, truncated: false, error: '' };
     renderPalette();
     return;
   }
 
-  searchState = { query, results: [], loading: true, truncated: false };
+  searchState = { ...searchState, query, results: [], loading: true, truncated: false, error: '' };
   renderPalette();
 
   searchTimer = setTimeout(async () => {
     let truncated = false;
     try {
-      const data = await apiJson(api('/api/search', { q: query }));
+      const data = await apiJson(api('/api/search', { q: query, ...searchOptions() }));
       if (token !== searchToken) return;
       searchState = {
+        ...searchState,
         query,
         results: Array.isArray(data.files) ? data.files : [],
         loading: false,
         truncated: !!data.truncated,
+        error: '',
       };
       truncated = searchState.truncated;
     } catch (err) {
       if (token !== searchToken) return;
-      searchState = { query, results: [], loading: false, truncated: false };
-      setStatus('busca falhou: ' + err.message);
+      // Padrão inválido aparece na própria lista, não só na barra de status.
+      searchState = { ...searchState, query, results: [], loading: false, truncated: false, error: err.message };
     }
 
     if (truncated) setStatus('busca truncada: mostrando as primeiras ocorrências');
@@ -2076,6 +2262,18 @@ function bindPalette() {
       closePalette();
     }
   });
+
+  // Opções da busca: Aa (diferenciar maiúsculas), .* (expressão regular) e o
+  // atalho para substituir nos arquivos com as mesmas opções.
+  const toggleSearch = (key) => {
+    searchState[key] = !searchState[key];
+    syncSearchOptions();
+    els.paletteinput.focus();
+    scheduleSearch();
+  };
+  els.searchcase.addEventListener('click', () => toggleSearch('caseSensitive'));
+  els.searchregex.addEventListener('click', () => toggleSearch('regex'));
+  els.searchreplace.addEventListener('click', () => replaceInFiles());
 
   els.palette.addEventListener('pointerdown', (event) => {
     if (event.target === els.palette) closePalette();
@@ -2494,6 +2692,7 @@ async function saveActiveFile() {
     await writeEntry(activePath, entry, text);
     entry.saved = text;
     updateDirty();
+    refreshGit();
     setStatus(`salvo ${baseName(activePath)}`);
   } catch (err) {
     setStatus('erro ao salvar: ' + err.message);
@@ -2532,6 +2731,7 @@ async function saveAllFiles() {
   }
 
   updateDirty();
+  if (saved) refreshGit();
   setStatus(saved ? `salvos ${saved} arquivo${saved > 1 ? 's' : ''}` : 'nada para salvar');
 }
 
@@ -2659,10 +2859,13 @@ function showMenu(x, y, entries) {
  * Diálogo próprio: `prompt()`/`confirm()` não são confiáveis no WebView2.
  * Com `altLabel`, a terceira opção resolve `'alt'` (usada para descartar).
  */
-function showDialog({ title, message = '', value, confirmLabel = 'ok', altLabel = '', danger = false }) {
+function showDialog({ title, message = '', value, confirmLabel = 'ok', altLabel = '', danger = false, allowEmpty = false }) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     overlay.className = 'overlay';
+    // Acima da paleta (z-index 70): diálogos abertos de dentro dela precisam
+    // ficar na frente e capturar os cliques.
+    overlay.style.zIndex = '80';
 
     const dialog = document.createElement('div');
     dialog.className = 'dialog';
@@ -2718,6 +2921,7 @@ function showDialog({ title, message = '', value, confirmLabel = 'ok', altLabel 
     };
     const submit = () => {
       if (!input) return finish(true);
+      if (allowEmpty) return finish(input.value);
       const name = input.value.trim();
       if (!name) {
         input.focus();
@@ -2855,6 +3059,7 @@ async function saveBlankFile(key, entry) {
     confirmLabel: 'salvar',
   });
   if (!target) return false;
+  if (!(await confirmOverwrite(target))) return false;
 
   try {
     const result = await apiJson(api('/api/saveas', { path: target }), {
@@ -2867,6 +3072,35 @@ async function saveBlankFile(key, entry) {
     setStatus('erro ao salvar: ' + err.message);
     return false;
   }
+}
+
+/**
+ * O destino já existe? O `/api/saveas` grava por cima sem perguntar, e perder
+ * um arquivo por um caminho digitado errado não tem desfazer.
+ */
+async function confirmOverwrite(target, current = '') {
+  if (current && normalizePath(target) === normalizePath(current)) return true;
+
+  let info = null;
+  try {
+    info = await apiJson(api('/api/pathexists', { path: target }));
+  } catch {
+    // Sem a checagem, o próprio `/api/saveas` responde o erro real.
+    return true;
+  }
+
+  if (info.dir) {
+    setStatus('o caminho é uma pasta: escolha um nome de arquivo');
+    return false;
+  }
+  if (!info.exists) return true;
+
+  return !!(await showDialog({
+    title: 'Substituir arquivo?',
+    message: `${target}\n\nO conteúdo atual será perdido.`,
+    confirmLabel: 'substituir',
+    danger: true,
+  }));
 }
 
 /**
@@ -2901,6 +3135,7 @@ async function adoptPath(key, entry, path) {
   renderTabs();
   updateDirty();
   scheduleSessionSave();
+  refreshGit();
   setStatus(`salvo ${baseName(path)}`);
 }
 
@@ -2937,6 +3172,8 @@ async function saveFileAs(copy = false) {
     await saveActiveFile();
     return;
   }
+
+  if (!(await confirmOverwrite(target, activePath))) return;
 
   try {
     const result = await apiJson(api('/api/saveas', { path: target }), {
@@ -3611,6 +3848,8 @@ async function refreshTree() {
     fillChildren(els.tree, items, 0, 'pasta vazia');
     for (const group of Array.from(els.tree.children)) await restoreExpanded(group);
     highlightActiveRow();
+    // A árvore mudou: os marcadores do git (M/A/D/?) vêm de um status novo.
+    refreshGit();
   } catch (err) {
     const failed = emptyRow('erro ao listar: ' + err.message, 0);
     failed.className = 'error pad';
@@ -3637,6 +3876,197 @@ async function refreshDir(path) {
   } catch {
     // Pasta removida: a listagem do pai é atualizada na mesma rodada.
   }
+}
+
+// ---------------------------------------------------------------------------
+// Git (branch, marcadores no explorador e commit)
+// ---------------------------------------------------------------------------
+let gitState = { repo: false, branch: '', detached: false, ahead: 0, behind: 0, list: [], changes: new Map() };
+
+/** Caminho relativo à raiz, no formato que o `git status` devolve. */
+function gitRelative(path) {
+  const root = normalizePath(state.root);
+  const target = normalizePath(path);
+  if (!root || !target.startsWith(root + '/')) return '';
+  return target.slice(root.length + 1);
+}
+
+/**
+ * Pede o status ao backend e atualiza barra, explorador e (se aberto) o painel.
+ * É barato o bastante para rodar depois de salvar e ao abrir o painel, mas não
+ * a cada tecla: em repositório grande o `git status` custa caro.
+ */
+async function refreshGit() {
+  try {
+    const data = await apiJson('/api/gitstatus');
+    const list = Array.isArray(data.changes) ? data.changes : [];
+    gitState = {
+      repo: !!data.repo,
+      branch: data.branch || '',
+      detached: !!data.detached,
+      ahead: Number(data.ahead) || 0,
+      behind: Number(data.behind) || 0,
+      list,
+      changes: new Map(list.map((change) => [normalizePath(change.path), change.code])),
+    };
+  } catch {
+    // Sem git instalado a interface só não mostra nada de repositório.
+    gitState = { repo: false, branch: '', detached: false, ahead: 0, behind: 0, list: [], changes: new Map() };
+  }
+
+  renderGitBadge();
+  applyGitMarks();
+  if (!els.git.hidden) renderGitPanel();
+}
+
+function renderGitBadge() {
+  const badge = els.statusgit;
+  if (!gitState.repo) {
+    badge.hidden = true;
+    badge.textContent = '';
+    return;
+  }
+
+  const count = gitState.list.length;
+  badge.hidden = false;
+  badge.textContent = `⑂ ${gitState.branch || 'sem branch'}${count ? ` • ${count}` : ''}`;
+  badge.classList.toggle('dirty', count > 0);
+
+  const parts = [gitState.detached ? 'HEAD destacado' : `branch ${gitState.branch}`];
+  if (gitState.ahead) parts.push(`${gitState.ahead} à frente`);
+  if (gitState.behind) parts.push(`${gitState.behind} atrás`);
+  parts.push(count ? `${count} alteração(ões)` : 'sem alterações');
+  badge.title = `${parts.join(' · ')} — clique para ver e commitar`;
+}
+
+/** Letra de estado (M/A/D/?/R) nas linhas do explorador. */
+function applyGitMarks() {
+  for (const row of els.tree.querySelectorAll('.row')) {
+    const code = gitState.repo ? gitState.changes.get(gitRelative(row.dataset.path || '')) : '';
+    let mark = row.querySelector('.gitmark');
+
+    if (!code) {
+      if (mark) mark.remove();
+      continue;
+    }
+    if (!mark) {
+      mark = document.createElement('span');
+      mark.className = 'gitmark';
+      row.append(mark);
+    }
+    mark.textContent = code;
+    mark.className = `gitmark ${code === '?' ? 'u' : code.toLowerCase()}`;
+  }
+}
+
+function renderGitPanel() {
+  els.gitbranch.textContent = gitState.repo
+    ? (gitState.detached ? 'HEAD destacado' : gitState.branch || 'sem branch')
+    : 'sem repositório';
+
+  const count = gitState.list.length;
+  const bits = [];
+  if (!gitState.repo) {
+    bits.push('nenhum repositório git nesta pasta');
+  } else {
+    bits.push(count ? `${count} arquivo(s) alterado(s)` : 'sem alterações');
+    if (gitState.ahead) bits.push(`${gitState.ahead} commit(s) à frente`);
+    if (gitState.behind) bits.push(`${gitState.behind} atrás`);
+  }
+  els.gitsummary.textContent = bits.join(' · ');
+
+  els.gitlist.replaceChildren();
+  if (!gitState.repo || !count) {
+    const empty = document.createElement('div');
+    empty.className = 'gitempty dim';
+    empty.textContent = gitState.repo ? 'nada para commitar' : 'abra uma pasta que seja um repositório git';
+    els.gitlist.append(empty);
+    return;
+  }
+
+  for (const change of gitState.list) {
+    const row = document.createElement('button');
+    row.type = 'button';
+    row.className = 'gitrow';
+    row.title = change.path;
+
+    const code = document.createElement('span');
+    code.className = 'code';
+    code.textContent = change.code || '•';
+
+    const path = document.createElement('span');
+    path.className = 'path';
+    path.textContent = change.path;
+
+    row.append(code, path);
+    row.addEventListener('click', () => {
+      closeGit();
+      openFile(joinRoot(change.path));
+    });
+    els.gitlist.append(row);
+  }
+}
+
+async function openGit() {
+  if (!state.root || state.selectionRequired) {
+    setStatus('abra uma pasta para usar o git');
+    return;
+  }
+  els.git.hidden = false;
+  els.gitoutput.hidden = true;
+  await refreshGit();
+  if (gitState.repo && gitState.list.length) els.gitmessage.focus();
+}
+
+function closeGit() {
+  els.git.hidden = true;
+}
+
+/** Primeira linha de uma saída do git, para a barra de status. */
+function firstLine(text) {
+  return String(text || '').split('\n').map((line) => line.trim()).find(Boolean) || '';
+}
+
+async function commitGit() {
+  const message = els.gitmessage.value.trim();
+  if (!message) {
+    setStatus('escreva a mensagem do commit');
+    els.gitmessage.focus();
+    return;
+  }
+
+  const button = $('gitcommit');
+  button.disabled = true;
+  setStatus('commitando…');
+  try {
+    const result = await apiJson('/api/gitcommit', { method: 'POST', body: message });
+    els.gitoutput.hidden = false;
+    els.gitoutput.textContent = result.output || (result.ok ? 'commit criado' : 'o git recusou o commit');
+
+    if (result.ok) {
+      els.gitmessage.value = '';
+      state.fileIndex = null;
+      setStatus('commit criado');
+      await refreshGit();
+      await refreshTree();
+    } else {
+      setStatus('git: ' + (firstLine(result.output) || 'commit recusado'));
+    }
+  } catch (err) {
+    setStatus('erro no commit: ' + err.message);
+  } finally {
+    button.disabled = false;
+  }
+}
+
+function bindGit() {
+  els.statusgit.addEventListener('click', openGit);
+  $('gitclose').addEventListener('click', closeGit);
+  $('gitrefresh').addEventListener('click', () => refreshGit());
+  $('gitcommit').addEventListener('click', commitGit);
+  els.git.addEventListener('pointerdown', (event) => {
+    if (event.target === els.git) closeGit();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -3711,6 +4141,8 @@ async function watchTick() {
     // Mais fundo primeiro: se uma pasta sumiu, o pai ainda a remove na sequência.
     changedDirs.sort((a, b) => b.length - a.length);
     for (const dir of changedDirs) await refreshDir(dir);
+    // Algo mudou no disco: os marcadores do git também envelheceram.
+    if (changedDirs.length) refreshGit();
   } catch {
     // A checagem é silenciosa: uma falha isolada não deve poluir a barra de status.
   } finally {
@@ -4251,6 +4683,37 @@ async function changeDir(target) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Histórico do terminal entre execuções
+// ---------------------------------------------------------------------------
+
+let historySaveTimer = null;
+
+/** Histórico antigo (`wincodeconfig/history.json`) entra na frente do atual. */
+async function loadHistory() {
+  try {
+    const data = await apiJson('/api/history');
+    if (!Array.isArray(data) || !data.length) return;
+    const merged = data.filter((entry) => typeof entry === 'string' && entry)
+      .concat(state.history)
+      .slice(-500);
+    state.history = merged;
+    state.historyIndex = merged.length;
+  } catch {
+    // Sem histórico persistido o terminal funciona igual, só não lembra.
+  }
+}
+
+function scheduleHistorySave() {
+  clearTimeout(historySaveTimer);
+  historySaveTimer = setTimeout(() => {
+    fetch('/api/savehistory', {
+      method: 'POST',
+      body: JSON.stringify(state.history.slice(-500)),
+    }).catch(() => {});
+  }, 1200);
+}
+
 /** Abre (se preciso) o terminal já apontado para uma pasta do explorador. */
 async function openTerminalAt(dir) {
   if (!settings.showTerminal) setSetting('showTerminal', true);
@@ -4263,7 +4726,9 @@ async function runCommandLine(input) {
   const cmd = input.trim();
   if (!cmd) return;
 
-  state.history.push(cmd);
+  // Repetição seguida não entra duas vezes (a seta para cima fica útil).
+  if (state.history[state.history.length - 1] !== cmd) state.history.push(cmd);
+  scheduleHistorySave();
   state.historyIndex = state.history.length;
   state.historyDraft = '';
   // Saída anterior sem quebra de linha: o prompt começa em linha própria.
@@ -4462,6 +4927,7 @@ function bindTerminal() {
       closeMenu();
       closeSettings();
       closePalette();
+      closeGit();
       if (els.terminal.classList.contains('fullscreen')) toggleTerminalFullscreen();
     }
     if (ctrl && !event.altKey && event.key === ',') {
@@ -4518,12 +4984,14 @@ function bindTerminal() {
   bindTerminal();
   bindSettings();
   bindPalette();
+  bindGit();
   buildThemeOptions();
   buildFontOptions();
   try {
     await loadMonaco();
     defineThemes();
     await loadSettings();
+    await loadHistory();
     await loadRecent();
     await loadUserFonts();
     startEditor();
@@ -4549,6 +5017,7 @@ function bindTerminal() {
       els.cmdinput.focus();
     }
     updateWelcome();
+    refreshGit();
     setInterval(watchTick, 2000);
   } catch (err) {
     setStatus('falha na inicialização');

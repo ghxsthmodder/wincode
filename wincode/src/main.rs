@@ -6,6 +6,8 @@ mod config;
 mod dialog;
 mod fonts;
 mod fsapi;
+mod git;
+mod history;
 mod index;
 mod jobs;
 mod protocol;
@@ -99,6 +101,7 @@ fn run() -> Result<(), String> {
     let fonts = Arc::new(fonts::Fonts::new());
     let recent = Arc::new(recent::Recent::new());
     let sessions = Arc::new(session::Sessions::new());
+    let history = Arc::new(history::History::new());
 
     // O que veio pela CLI também entra na lista de recentes da tela inicial.
     {
@@ -121,9 +124,11 @@ fn run() -> Result<(), String> {
             let fonts = fonts.clone();
             let recent = recent.clone();
             let sessions = sessions.clone();
+            let history = history.clone();
             move |request| {
                 protocol::serve(
-                    &assets, &state, &jobs, &settings, &fonts, &recent, &sessions, request,
+                    &assets, &state, &jobs, &settings, &fonts, &recent, &sessions, &history,
+                    request,
                 )
             }
         });

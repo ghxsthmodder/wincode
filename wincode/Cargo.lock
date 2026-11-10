@@ -3216,6 +3216,7 @@ name = "wincode"
 version = "0.1.0"
 dependencies = [
  "ico",
+ "regex",
  "rfd",
  "serde_json",
  "tao",

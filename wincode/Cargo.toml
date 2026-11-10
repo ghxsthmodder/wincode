@@ -8,6 +8,8 @@ description = "Wincode — editor de código minimalista (file tree | Monaco | t
 # WebView2 no Windows (WebKitGTK no Linux, apenas para desenvolvimento).
 wry = { version = "0.31", default-features = false, features = ["protocol"] }
 serde_json = { version = "1.0", features = ["preserve_order"] }
+# Busca e substituição com expressão regular (a busca literal é escapada).
+regex = "1"
 urlencoding = "2"
 tao = "0.22"
 # Decodifica o wincode.ico embutido para o ícone da janela (single .exe).

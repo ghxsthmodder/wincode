@@ -44,6 +44,8 @@ wincode/
     recent.rs               # projetos recentes da tela inicial
     session.rs              # sessão por projeto (abas, cursores, pastas abertas)
     settings.rs             # preferências do editor (JSON no config do usuário)
+    git.rs                  # status/commit do repositório (via git.exe)
+    history.rs              # histórico do terminal entre execuções
     term.rs                 # decodificação da saída do terminal (UTF-8/Latin-1/UTF-16)
 ```
 
@@ -154,6 +156,23 @@ A saída é **tratada antes de aparecer**, porque um pipe não é um terminal de
 - a saída é mantida como texto (nada de cores): o objetivo é manter o conteúdo legível
   em qualquer tema
 
+## Git
+
+Quando a pasta aberta é um repositório, a barra de status mostra **⑂ branch • N**
+(alterações pendentes); clicar abre o painel. Nele estão a lista de arquivos alterados
+(clicar abre o arquivo), o resumo com quantos commits está à frente/atrás e o campo de
+mensagem do commit — o **commit** faz `git add -A` + `git commit -m` e mostra a saída do
+git (inclusive "nothing to commit").
+
+As linhas do explorador ganham a letra do estado: **M** alterado, **A** novo no índice,
+**D** excluído, **R** renomeado, **?** não rastreado. O status é pedido ao abrir o painel,
+depois de salvar e quando a árvore é recarregada — não a cada tecla, porque em repositório
+grande o `git status` custa caro.
+
+Tudo passa pelo `git.exe` do PATH, sem lib e sem credencial guardada: `push`, `pull` e
+`checkout` continuam no terminal. Fora de um repositório (ou sem git instalado) a barra
+simplesmente não mostra nada.
+
 ## Recarregamento automático
 
 A cada ~2 segundos o editor confere **apenas o que está visível**: a pasta raiz, as
@@ -164,6 +183,13 @@ No modo arquivo único só o próprio arquivo entra na checagem: a pasta dele po
 enorme (Downloads, Área de Trabalho) e não é lida a cada dois segundos.
 Arquivos abertos **sem alterações pendentes** são relidos do disco; abas com edições não
 salvas nunca são sobrescritas — salve ou descarte antes.
+
+## Histórico do terminal
+
+Os comandos digitados ficam em `wincodeconfig/history.json` (os 500 últimos, sem
+repetições seguidas) e voltam na próxima execução — a seta para cima lembra o comando de
+ontem em qualquer pasta. O arquivo é gravado cerca de um segundo depois do comando, então
+fechar o editor logo em seguida ainda não perde o último.
 
 ## Abas
 
@@ -187,7 +213,8 @@ projeto) não são reabertas por aí — a leitura é restrita à raiz.
 **Salvar como…** e **salvar uma cópia…** estão na paleta: o primeiro grava em outro
 caminho e leva a aba para lá (o arquivo antigo fica como estava), o segundo só grava a
 cópia e mantém a aba atual. Caminho relativo continua preso ao projeto; caminho completo
-pode sair dele.
+pode sair dele. Se o destino já existir, um diálogo pede confirmação antes de sobrescrever
+(o caminho de uma pasta é recusado de antemão).
 
 ## Navegação no arquivo
 
@@ -224,10 +251,20 @@ digita (250 ms de espera e a partir de dois caracteres). Cada linha mostra o tre
 ocorrência como título e `arquivo:linha` à direita; `Enter` abre o arquivo (ou troca
 para a aba) com o cursor na posição exata.
 
-A busca é textual, sem diferenciar maiúsculas, feita em Rust sobre o mesmo índice do
-`Ctrl+P` — herda as pastas ignoradas e não exige `rg` nem `findstr` instalados. Limites
-por resposta: 200 ocorrências (20 por arquivo), arquivos até 1 MB, binários de fora e
-orçamento de 1,5 s; quando algo fica de fora, a barra de status avisa.
+A busca é feita em Rust sobre o mesmo índice do `Ctrl+P` — herda as pastas ignoradas e não
+exige `rg` nem `findstr` instalados. Por padrão é literal e sem diferenciar maiúsculas; as
+opções no rodapé do modal ligam **Aa** (diferenciar maiúsculas) e **.*** (expressão
+regular, com `regex` do Rust). Um padrão inválido aparece na própria lista, sem travar a
+digitação. Como a busca literal é escapada, digitar `(` procura o parêntese.
+
+**substituir…** aplica a mesma busca em todos os arquivos do projeto de uma vez, com o
+texto novo pedido em diálogo (vazio apaga as ocorrências). A troca é literal quando a busca
+é literal — um `$1` digitado fica `$1` — e aceita grupos de captura (`$1`, `${nome}`)
+quando a busca é regex. Só arquivos do índice são tocados, os que mudaram são reescritos, e
+as abas abertas **sem** alterações pendentes são relidas do disco; as sujas ficam como
+estão. Limites por busca: 200 ocorrências (20 por arquivo), arquivos até 1 MB, binários de
+fora e orçamento de 1,5 s (5 s na substituição); quando algo fica de fora, a barra de
+status avisa.
 
 ## Sessão por projeto
 
@@ -351,7 +388,9 @@ Comandos disponíveis:
   novo arquivo/pasta, recarregar a árvore
 - **projeto**: abrir pasta/arquivo, criar arquivo em branco, mostrar/ocultar explorador,
   abas e terminal, terminal em tela cheia, focar e limpar o terminal, **interromper o
-  comando em execução** (só aparece enquanto há um)
+  comando em execução** (só aparece enquanto há um), **painel do git**
+- **busca**: buscar em arquivos, buscar e substituir em arquivos, escolher as opções de
+  caixa e de expressão regular
 - **configurações**: abrir o painel, alternar minimapa, quebra de linha, números de linha,
   indentação (espaços ↔ tabulação), tamanho da fonte, tema do editor, tema da interface,
   ícones da árvore e salvamento automático; restaurar padrões
@@ -427,8 +466,13 @@ licença em `assets/icons/LICENSE-material-icon-theme.txt`.
 - **Ir para símbolo** é um mapa textual, não o *outline* de um servidor de linguagem:
   declarações em linhas com formato incomum (multi-linha, geradas, dentro de expressões)
   podem não aparecer.
-- **Salvar como** sobrescreve um arquivo existente sem pedir confirmação; use **salvar uma
-  cópia…** quando quiser garantir o original.
+- O git depende do `git.exe` no PATH; o painel faz status e commit de tudo, sem staging
+  por arquivo, diff embutido, branches ou `push`/`pull` (esses continuam no terminal).
+- A substituição em arquivos só mexe no que o índice encontra: pastas ignoradas (`.git`,
+  `node_modules`, `target`…), binários e arquivos acima de 1 MB ficam de fora, e arquivos
+  com alterações não salvas não são recarregados.
+- O histórico do terminal guarda os 500 comandos mais recentes de todas as pastas, sem
+  separar por projeto.
 - `wincodeconfig` precisa ser gravável para guardar a lista de recentes; para as fontes basta
   que a pasta seja legível (útil quando o `.exe` fica em `Program Files`).
 - Terminal não é interativo (sem stdin/TTY): comandos que pedem entrada ficam bloqueados.

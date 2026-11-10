@@ -72,6 +72,27 @@ acompanha as correções e melhorias pedidas.
   de preferências numa aba; o `Ctrl+S` passa por `/api/savesettings`, que valida o JSON e
   reaplica as opções na hora. JSON inválido é recusado e a aba continua pendente.
 
+## Terceira rodada (novos recursos)
+
+- **git na interface** — *feito*. A barra de status mostra **⑂ branch • N** quando a pasta
+  é um repositório; o clique abre um painel com a lista de arquivos alterados (clique abre
+  o arquivo), o resumo (à frente/atrás) e o campo de mensagem. O **commit** roda
+  `git add -A` + `git commit -m` e mostra a saída do git, inclusive quando não há nada para
+  commitar. As linhas do explorador ganham a letra do estado (M/A/D/R/?). O status é pedido
+  ao abrir o painel, depois de salvar e ao recarregar a árvore — não a cada tecla.
+- **confirmação de sobrescrita** — *feito*. Antes de gravar um "salvar como", o destino é
+  conferido com `/api/pathexists`: se já existe, um diálogo pede confirmação; se é uma
+  pasta, o salvamento nem começa.
+- **histórico do terminal persistente** — *feito*. Os comandos vão para
+  `wincodeconfig/history.json` (500 últimos, sem repetições seguidas) cerca de um segundo
+  depois de cada execução e voltam na próxima abertura; as setas continuam navegando.
+- **busca com regex e substituição** — *feito*. O modal de busca ganhou **Aa** (diferenciar
+  maiúsculas) e **.*** (expressão regular) no rodapé, e um botão **substituir…** que aplica
+  a busca em todos os arquivos do projeto, com diálogo para o texto novo (vazio apaga). A
+  busca literal é escapada (digitar `(` procura o parêntese) e a troca literal mantém `$1`
+  como texto; com regex, grupos de captura funcionam. Abas abertas sem alterações pendentes
+  são relidas do disco depois da troca.
+
 ## Como conferir
 
 - `Ctrl+Shift+P` → *novo arquivo em branco…* → digitar texto → `Ctrl+S` (o diálogo sugere
@@ -90,6 +111,12 @@ acompanha as correções e melhorias pedidas.
   explorador abrir a pasta; `Alt+↓` e `Shift+Alt+↓`.
 - Paleta → *abrir settings.json*, mudar `"fontSize"`, `Ctrl+S` e ver a fonte do editor mudar;
   depois quebrar o JSON de propósito e conferir a recusa.
+- Git: abrir um repositório e conferir o **⑂** na barra, os marcadores no explorador e um
+  commit pelo painel; tentar commitar sem alterações para ver a saída do git.
+- Terminal: fechar e reabrir o editor e apertar `↑` para ver o comando anterior.
+- Busca: `Ctrl+Shift+F`, ligar **.***, procurar `fn\s+\w+`, depois **substituir…** com
+  `fn $1`; conferir o aviso na barra e as abas relidas.
+- Salvar como: escolher um nome que já existe e ver o diálogo de substituir.
 
 ## Pendências conhecidas
 
@@ -104,3 +131,8 @@ acompanha as correções e melhorias pedidas.
 - **Salvar como** sobrescreve um arquivo existente sem pedir confirmação.
 - A aba de um arquivo aberto fora da raiz não é reaberta por `Ctrl+Shift+T` (a leitura é
   restrita ao projeto).
+- O git depende do `git.exe` no PATH e só cobre status e commit de tudo: sem staging por
+  arquivo, diff embutido, troca de branch ou `push`/`pull`.
+- A substituição em arquivos respeita os limites do índice: pastas ignoradas, binários e
+  arquivos acima de 1 MB não são tocados.
+- O histórico do terminal é único para a máquina, não por projeto.

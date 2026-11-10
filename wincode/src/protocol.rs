@@ -1,6 +1,7 @@
 use crate::assets::Assets;
 use crate::fonts::Fonts;
 use crate::fsapi::FsState;
+use crate::history::History;
 use crate::jobs::Jobs;
 use crate::recent::Recent;
 use crate::session::Sessions;
@@ -22,6 +23,7 @@ pub(super) fn serve(
     fonts: &Arc<Fonts>,
     recent: &Arc<Recent>,
     sessions: &Arc<Sessions>,
+    history: &Arc<History>,
     request: &Request<Vec<u8>>,
 ) -> Result<Response<Body>> {
     let uri = request.uri();
@@ -39,6 +41,7 @@ pub(super) fn serve(
             fonts,
             recent,
             sessions,
+            history,
         ));
     }
 
@@ -82,6 +85,7 @@ fn api(
     fonts: &Arc<Fonts>,
     recent: &Arc<Recent>,
     sessions: &Arc<Sessions>,
+    history: &Arc<History>,
 ) -> Response<Body> {
     match route {
         "root" => {
@@ -98,7 +102,18 @@ fn api(
         }
         "fonts" => json(fonts.list()),
         "index" => index_files(state),
-        "search" => search_files(param(query, "q"), state),
+        "search" => search_files(param(query, "q"), search_options(query), state),
+        "replace" => replace_files(
+            param(query, "q"),
+            param(query, "replace"),
+            search_options(query),
+            state,
+        ),
+        "pathexists" => path_exists(param(query, "path"), state),
+        "gitstatus" => git_status(state),
+        "gitcommit" => git_commit(body, state),
+        "history" => json(serde_json::Value::from(history.load())),
+        "savehistory" => save_history(body, history),
         "session" => json(sessions.load(&param(query, "root").unwrap_or_default())),
         "savesession" => match sessions.save(&param(query, "root").unwrap_or_default(), body) {
             Ok(()) => json(serde_json::json!({ "ok": true })),
@@ -162,29 +177,80 @@ fn index_files(state: &Arc<Mutex<FsState>>) -> Response<Body> {
     }
 }
 
+/// Opções de busca vindas da interface: `regex=1` e `case=1` (diferenciar
+/// maiúsculas). Ausentes, valem busca literal sem diferenciar caixa.
+fn search_options(query: Option<&str>) -> crate::search::Options {
+    let flag = |key: &str| {
+        param(query, key)
+            .map(|value| value == "1" || value == "true")
+            .unwrap_or(false)
+    };
+
+    crate::search::Options::new(flag("regex"), flag("case"))
+}
+
 /// Busca textual no projeto (Ctrl+Shift+F). Uma letra custaria a varredura toda,
 /// então só a partir de dois caracteres.
-fn search_files(query: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {
+fn search_files(
+    query: Option<String>,
+    options: crate::search::Options,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
     let query = query.unwrap_or_default();
-    if query.chars().count() > 200 {
+    if query.chars().count() > 500 {
         return plain(StatusCode::BAD_REQUEST, "busca longa demais");
     }
     if query.trim().chars().count() < 2 {
         return json(serde_json::json!({ "files": [], "truncated": false }));
     }
 
+    let root = match project_root(state) {
+        Some(root) => root,
+        None => return json(serde_json::json!({ "files": [], "truncated": false })),
+    };
+
+    match crate::search::run(&root, &query, &options) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Substituir em todos os arquivos do projeto (o "substituir tudo" da busca).
+fn replace_files(
+    query: Option<String>,
+    replacement: Option<String>,
+    options: crate::search::Options,
+    state: &Arc<Mutex<FsState>>,
+) -> Response<Body> {
+    let query = query.unwrap_or_default();
+    if query.trim().is_empty() {
+        return plain(StatusCode::BAD_REQUEST, "digite o que procurar");
+    }
+    if query.chars().count() > 500 {
+        return plain(StatusCode::BAD_REQUEST, "busca longa demais");
+    }
+
+    let Some(root) = project_root(state) else {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    };
+
+    match crate::search::replace(&root, &query, &replacement.unwrap_or_default(), &options) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+/// Raiz canônica do projeto, ou `None` quando nenhuma pasta foi escolhida.
+fn project_root(state: &Arc<Mutex<FsState>>) -> Option<std::path::PathBuf> {
     let root = {
         let guard = state.lock().unwrap();
         if !guard.selected {
-            return json(serde_json::json!({ "files": [], "truncated": false }));
+            return None;
         }
         guard.root.clone()
     };
 
-    match std::fs::canonicalize(&root) {
-        Ok(root) => json(crate::search::run(&root, &query)),
-        Err(err) => plain(StatusCode::BAD_REQUEST, &format!("pasta inválida: {err}")),
-    }
+    std::fs::canonicalize(root).ok()
 }
 
 fn pick_folder(state: &Arc<Mutex<FsState>>, recent: &Arc<Recent>) -> Response<Body> {
@@ -652,6 +718,72 @@ fn poll(id: Option<String>, jobs: &Arc<Jobs>) -> Response<Body> {
             "code": code,
         })),
         Err(err) => plain(StatusCode::NOT_FOUND, &err),
+    }
+}
+
+/// O destino de um "salvar como" já existe? A interface pergunta antes de
+/// sobrescrever (o `/api/saveas` grava por cima sem perguntar).
+fn path_exists(path_param: Option<String>, state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let Some(requested) = path_param.map(|value| value.trim().to_string()) else {
+        return plain(StatusCode::BAD_REQUEST, "parâmetro path ausente");
+    };
+    if requested.is_empty() {
+        return plain(StatusCode::BAD_REQUEST, "informe o caminho do arquivo");
+    }
+
+    let target = if std::path::Path::new(&requested).is_absolute() {
+        std::path::absolute(&requested).unwrap_or_else(|_| std::path::PathBuf::from(&requested))
+    } else {
+        match state.lock().unwrap().resolve(&requested) {
+            Ok(target) => target,
+            Err(err) => return plain(StatusCode::BAD_REQUEST, &err),
+        }
+    };
+
+    json(serde_json::json!({
+        "exists": target.exists(),
+        "dir": target.is_dir(),
+    }))
+}
+
+/// Situação do git na raiz aberta; `repo: false` quando não é repositório (ou
+/// quando o git não está instalado).
+fn git_status(state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+
+    // Sem projeto escolhido não há repositório: a pasta do próprio .exe não conta.
+    if !selected {
+        return json(serde_json::json!({ "repo": false }));
+    }
+
+    json(crate::git::status(&root))
+}
+
+/// Commit de tudo o que está pendente (`git add -A` + `git commit -m`).
+fn git_commit(body: &[u8], state: &Arc<Mutex<FsState>>) -> Response<Body> {
+    let message = String::from_utf8_lossy(body).to_string();
+    let (selected, root) = {
+        let guard = state.lock().unwrap();
+        (guard.selected, guard.root.clone())
+    };
+
+    if !selected {
+        return plain(StatusCode::BAD_REQUEST, "nenhum projeto aberto");
+    }
+
+    match crate::git::commit(&root, &message) {
+        Ok(value) => json(value),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
+    }
+}
+
+fn save_history(body: &[u8], history: &Arc<History>) -> Response<Body> {
+    match history.save(body) {
+        Ok(entries) => json(serde_json::json!({ "ok": true, "count": entries.len() })),
+        Err(err) => plain(StatusCode::BAD_REQUEST, &err),
     }
 }
 
