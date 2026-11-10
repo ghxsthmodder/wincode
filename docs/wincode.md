@@ -1,15 +1,17 @@
 # Wincode — correções e melhorias
 
 Lista de pontos levantados na revisão de uso, com o estado de cada um. O que já está
-aplicado aparece com **feito** e uma nota curta de como ficou.
+aplicado aparece com **feito** e uma nota curta de como ficou. Os recursos do editor
+(atalhos, abas, busca, sessão, temas) estão no `wincode/README.md`; este documento
+acompanha as correções e melhorias pedidas.
 
 ## Editor
 
-- **barra de rolagem vermelha** — *feito*. A cor vinha do WebView2, que no Windows 11 usa a
-  cor de destaque do sistema; o Monaco ficava com a barra do tema nativo. Agora todas as
-  barras (explorador, terminal, configurações, diálogos e editor) usam `--scrollbar` /
-  `--scrollbar-hover`, derivadas do tema, e o Monaco recebe `scrollbarSlider.*` e
-  `minimapSlider.*` do mesmo tom.
+- **barra de rolagem vermelha** — *feito*. A suspeita é o WebView2, que no Windows 11
+  pinta as barras nativas com a cor de destaque do sistema. Para não depender disso, todas
+  as barras (explorador, terminal, configurações e diálogos) passaram a usar `--scrollbar` /
+  `--scrollbar-hover`, derivadas do tema, e o Monaco recebeu `scrollbarSlider.*` e
+  `minimapSlider.*` do mesmo tom. Vale conferir nos temas claros e escuros.
 
 ## Início
 
